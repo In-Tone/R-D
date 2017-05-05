@@ -186,15 +186,19 @@ Analyzer.prototype = {
 	},
 
 	findTone: function (minFreq, maxFreq) {
+		// console.log('this.tones:\n', this.tones);
 		if (!this.tones.length) {
+			// console.log('does this happen?');
 			this.oldFreq = 0.0;
 			return null;
 		}
-
-		minFreq = typeof minFreq === 'undefined' ? 65.0 : minFreq;
-		maxFreq = typeof maxFreq === 'undefined' ? 1000.0 : maxFreq;
+		//default frequency range was 65 - 1000
+		minFreq = typeof minFreq === 'undefined' ? 75.0 : minFreq;
+		maxFreq = typeof maxFreq === 'undefined' ? 500 : maxFreq;
+		// maxFreq = typeof maxFreq === 'undefined' ? 1000.0 : maxFreq;
 
 		var db = max.apply(null, this.tones.map(Analyzer.mapdb));
+		// console.log('\n THIS IS THE MAX VALUE \n', db);
 		var best = null;
 		var bestscore = 0;
 
@@ -212,7 +216,15 @@ Analyzer.prototype = {
 		}
 
 		this.oldFreq = (best ? best.freq : 0.0);
-		return best;
+
+		if (best && best.freq) {
+			return best.freq;
+		} else {
+			// return 0;
+			return best;
+		}
+
+		// return best;
 	},
 
 /**
@@ -223,6 +235,8 @@ Analyzer.prototype = {
  * @arg {Float32Array} data The input data.
 */
 	input: function (data) {
+		// console.log('inside pitch.js');
+		// console.log('the data: ', data);
 		var buf = this.buffer;
 		var r = this.bufRead;
 		var w = this.bufWrite;
@@ -447,6 +461,7 @@ Analyzer.prototype = {
 };
 
 Analyzer.mapdb = function (e) {
+	// console.log('\n ANALYZER.MDB\n', e);
 	return e.db;
 };
 

@@ -6,7 +6,7 @@ let analyserNode;
 
 // load the sound
 setupAudioNodes();
-loadSound('sandwich.mp3');
+loadSound('marcCow.wav');
 
 
 function setupAudioNodes() {
