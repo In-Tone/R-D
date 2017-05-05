@@ -1,6 +1,8 @@
 const autocorrelation = require('autocorrelation').autocorrelation;
 const chroma = require('chroma-js');
 let Plotly = require('plotly');
+const fft = require('fft');
+const PitchAnalyzer = require('./pitch.js/src/pitch.js');
 
 // create the audio context (chrome only for now)
 if (! window.AudioContext) {
@@ -18,24 +20,8 @@ var analyser;
 var javascriptNode;
 
 // get the context from the canvas to draw on
-var ctx = document.getElementById("canvas").getContext("2d");
-
-// create a temp canvas we use for copying
-var tempCanvas = document.createElement("canvas"),
-    tempCtx = tempCanvas.getContext("2d");
-tempCanvas.width=800;
-tempCanvas.height=512;
-
-// used for color distribution
-/*var hot = new chroma.scale({
-    colors:['#000000', '#ff0000', '#ffff00', '#ffffff'],
-    positions:[0, .25, .75, 1],
-    mode:'rgb',
-    limits:[0, 300]
-});*/
-
-var hot = {colors:['#000000', '#ff0000', '#ffff00', '#ffffff']}
-
+var canvas = document.getElementById("canvas");
+var ctx = canvas.getContext("2d");
 
 // load the sound
 setupAudioNodes();
@@ -53,7 +39,7 @@ function setupAudioNodes() {
     // setup a analyzer
     analyser = context.createAnalyser();
     analyser.smoothingTimeConstant = 0;
-    analyser.fftSize = 1024;
+    analyser.fftSize = 4096;
 
     // create a buffer source node
     sourceNode = context.createBufferSource();
@@ -84,8 +70,8 @@ function loadSound(url) {
 
 function playSound(buffer) {
     sourceNode.buffer = buffer;
-    sourceNode.start(0);
-    sourceNode.loop = false;
+    // sourceNode.start(0);
+    // sourceNode.loop = false;
 }
 
 // log if an error occurs
@@ -102,54 +88,223 @@ javascriptNode.onaudioprocess = function () {
     var array = new Float32Array(analyser.frequencyBinCount);
     analyser.getFloatFrequencyData(array);
 
+    // console.log("sourceNode", sourceNode.buffer);
+    var data = sourceNode.buffer.getChannelData(0);
+
+    /* Create a new pitch detector */
+    var pitchOne = new PitchAnalyzer(44100);
+
+    // console.log("data", data);
+
+    /* Copy samples to the internal buffer */
+    // pitchOne.input(sourceNode.buffer.getChannelData(0).slice(1000,10000));
+
+    var n = 1001;
+    var i = 1;
+
+    var tones = [];
+    var vols = [];
+
+    while (n < data.length && i < 50000) {
+        pitchOne.input(data.slice(n-1000, n));
+        /* Process the current input in the internal buffer */
+        pitchOne.process();
+        // console.log("pitchOne instance", pitchOne);
+
+        var toneOne = pitchOne.findTone();
+
+        if (toneOne === null) {
+            // console.log('No tone found!');
+            tones.push(0);
+            vols.push(0);
+        } else {
+            // console.log('Found a toneOne, frequency:', toneOne.freq, 'volume:', toneOne.db);
+            tones.push(toneOne.freq);
+            vols.push(toneOne.db);
+        }
+        n = n+1000;
+        i++;
+    }
+    // console.log("tones.length / tones", tones.length, tones);
+    // console.log("vols.length / vols", vols.length, vols);
+
     // LOOPING HERE
     // draw the spectrogram
-    drawSpectrogram(array);
+    // drawSpectrogram(array);
 
 }
 
-// AUTOCORRELATED PLOT
-let acf;
-let arrayTemp = []
-function drawSpectrogram(array) {
+// mic situation
 
-    acf = autocorrelation(array)
+var hpFilter = context.createBiquadFilter();
+hpFilter.type = "highpass";
+hpFilter.frequency.value = 85;
+hpFilter.gain.value = 10;
 
-    arrayTemp.push(array)
+var lpFilter = context.createBiquadFilter();
+lpFilter.type = "lowpass";
+lpFilter.frequency.value = 900;
+lpFilter.gain.value = 10;
 
-    console.log('autocorrelated array', acf)
-    console.log('buffer array', array)    
-    
+var viz = context.createAnalyser();
+viz.fftSize = 2048;
 
-    // copy the current canvas onto the temp canvas
-    var canvas = document.getElementById("canvas");
+var arrayOne = new Float32Array(viz.frequencyBinCount);
+var arrayTwo = new Uint8Array(viz.frequencyBinCount);
 
-    tempCtx.drawImage(canvas, 0, 0, 800, 512);
+function draw() {
 
-    // iterate over the elements from the array
-    for (var i = 0; i < array.length; i++) {
-        // draw each pixel with the specific color
-        var value = array[i];
-        ctx.fillStyle = hot.colors[(Math.round(Math.random()*10) + 1)];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgb(214, 68, 68)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // draw the line at the right side of the canvas
-        ctx.fillRect(800 - 1, 512 - i, 1, 1);
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = 'rgb(0, 0, 0)';
+
+    ctx.beginPath();
+
+    var sliceWidth = canvas.width * 1.0 / viz.frequencyBinCount;
+    var x = 0;
+
+    for(var i = 0; i < viz.frequencyBinCount; i++) {
+
+        var v = arrayTwo[i] / 128.0;
+        var y = v * canvas.height/2;
+
+        if(i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+        
+        x += sliceWidth;
     }
 
-    // set translate on the canvas
-    ctx.translate(-1, 0);
-    // draw the copied image
-    ctx.drawImage(tempCanvas, 0, 0, 800, 512, 0, 0, 800, 512);
-
-    // reset the transformation matrix
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.lineTo(canvas.width, canvas.height/2);
+    ctx.stroke();
 
 }
 
-/*autoPlot = document.getElementById('plot');
+draw();
 
-Plotly.plot( autoPlot, [{
-    x: [0],
-    y: acf }], { 
-    margin: { t: 0 } } 
-);*/
+var constraints = { audio: true, video: false };
+navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
+
+    var mediaRecorder = new MediaRecorder(stream);
+
+    var recording = [];
+
+    mediaRecorder.ondataavailable = function(e) {
+        recording.push(e.data);
+    };
+
+    var source = context.createMediaStreamSource(stream);
+    viz.getFloatFrequencyData(arrayOne);
+    source.connect(lpFilter);
+    lpFilter.connect(hpFilter);
+    hpFilter.connect(viz);
+
+    var record = document.getElementById("record");
+    var stop = document.getElementById("stop");
+
+    var repeatDraw;
+
+    record.onclick = function() {
+    viz.connect(context.destination);
+        mediaRecorder.start();
+        repeatDraw = setInterval(() => {
+            // mediaRecorder.requestData();
+            viz.getByteTimeDomainData(arrayTwo);
+            draw();
+        }, 100);
+        record.style.background = "red";
+        record.style.color = "black";
+    }
+
+    stop.onclick = function() {
+    viz.disconnect(context.destination);
+      mediaRecorder.requestData();
+      mediaRecorder.stop();
+      record.style.background = "";
+      record.style.color = "";
+      clearInterval(repeatDraw);
+    }
+
+    mediaRecorder.onstop = function(e) {
+      console.log("recorder stopped");
+
+      console.log("arrayOne", arrayOne);
+
+      var clipName = prompt('Enter a name for your sound clip');
+
+      var clipContainer = document.createElement('article');
+      var clipLabel = document.createElement('p');
+      var audio = document.createElement('audio');
+      var deleteButton = document.createElement('button');
+
+      clipContainer.classList.add('clip');
+      audio.setAttribute('controls', '');
+      deleteButton.innerHTML = "Delete";
+      clipLabel.innerHTML = clipName;
+
+      clipContainer.appendChild(audio);
+      clipContainer.appendChild(clipLabel);
+      clipContainer.appendChild(deleteButton);
+      soundClips.appendChild(clipContainer);
+
+      var blob = new Blob(recording, { 'type' : 'audio/ogg; codecs=opus' });
+      recording = [];
+      var audioURL = window.URL.createObjectURL(blob);
+      audio.src = audioURL;
+
+        var reader = new FileReader();
+        reader.addEventListener("loadend", function() {
+            // while (reader.result.byteLength % 4 !== 0) {
+            //     console.log("BAD");
+            // }
+            var buffer = new Uint8Array(reader.result);
+
+            var pitchCon = new PitchAnalyzer(44100);
+
+            var n = 1001;
+            var i = 1;
+
+            var tones = [];
+            var vols = [];
+
+            while (n < buffer.length && i < 50000) {
+                pitchCon.input(buffer.slice(n-1000, n));
+                /* Process the current input in the internal buffer */
+                pitchCon.process();
+                // console.log("pitchCon instance", pitchCon);
+
+                var toneOne = pitchCon.findTone();
+
+                if (toneOne === null) {
+                    console.log('No tone found!');
+                    tones.push(0);
+                    vols.push(0);
+                } else {
+                    console.log('Found a toneOne, frequency:', toneOne.freq, 'volume:', toneOne.db);
+                    tones.push(toneOne.freq);
+                    vols.push(toneOne.db);
+                }
+                n = n+1000;
+                i++;
+            }
+            console.log('tones', tones);
+            console.log('vols', vols);
+
+        });
+        reader.readAsArrayBuffer(blob);
+
+      deleteButton.onclick = function(e) {
+        var evtTgt = e.target;
+        evtTgt.parentNode.parentNode.removeChild(evtTgt.parentNode);
+      }
+    }
+
+}).catch(function(err) {
+    console.log(err);
+});
+

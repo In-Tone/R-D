@@ -27,10 +27,11 @@ function loadSound(url) {
 
     // When loaded decode the data
     request.onload = function() {
-
+        console.log("request.response", request.response);
         // decode the data
         context.decodeAudioData(request.response, function(buffer) {
             // when the audio is decoded play the sound
+            // console.log("buffer", buffer)
              playSound(buffer);
 
         });
@@ -40,8 +41,8 @@ function loadSound(url) {
 
 
 function playSound(buffer) {
-	console.log('buffer type', buffer.length)
+	// console.log('buffer type', buffer.length)
     sourceNode.buffer = buffer;
-    console.log('sourceNode.buffer', sourceNode.buffer)
+    // console.log('sourceNode.buffer', sourceNode.buffer)
     sourceNode.start(0);
 }

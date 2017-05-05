@@ -1,0 +1,13 @@
+#app {
+	text-align: center;
+}
+
+button {
+	height: 40px;
+	width: 90px;
+}
+
+canvas {
+	margin: auto;
+	text-align: center;
+}

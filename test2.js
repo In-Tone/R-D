@@ -31,6 +31,7 @@ function loadSound(url) {
         // decode the data
         context.decodeAudioData(request.response, function(buffer) {
             // when the audio is decoded play the sound
+            console.log("buffer", buffer);
              playSound(buffer);
 
             // get freq data in an array:
