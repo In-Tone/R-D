@@ -19,6 +19,7 @@
     "express": "^4.15.2",
     "fft": "^0.2.1",
     "plotly": "^1.0.6",
+    "timeseries-analysis": "^1.0.12",
     "webpack": "^2.4.1"
   }
 }

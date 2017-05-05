@@ -216,7 +216,7 @@ Analyzer.prototype = {
 		}
 
 		this.oldFreq = (best ? best.freq : 0.0);
-
+		// console.log(best);
 		if (best && best.freq) {
 			return best.freq;
 		} else {

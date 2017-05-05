@@ -6,9 +6,9 @@
 /******/ 	function __webpack_require__(moduleId) {
 /******/
 /******/ 		// Check if module is in cache
-/******/ 		if(installedModules[moduleId]) {
+/******/ 		if(installedModules[moduleId])
 /******/ 			return installedModules[moduleId].exports;
-/******/ 		}
+/******/
 /******/ 		// Create a new module (and put it into the cache)
 /******/ 		var module = installedModules[moduleId] = {
 /******/ 			i: moduleId,
@@ -63,7 +63,7 @@
 /******/ 	__webpack_require__.p = "";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 30);
+/******/ 	return __webpack_require__(__webpack_require__.s = 26);
 /******/ })
 /************************************************************************/
 /******/ ([
@@ -528,10 +528,10 @@ module.exports = {
 \*===========================================================================*/
 module.exports = {
     fft: __webpack_require__(2).fft,
-    ifft: __webpack_require__(20).ifft,
+    ifft: __webpack_require__(18).ifft,
     fftInPlace: __webpack_require__(2).fftInPlace,
     util: __webpack_require__(3),
-    dft: __webpack_require__(19)
+    dft: __webpack_require__(17)
 };
 
 
@@ -542,7 +542,7 @@ module.exports = {
 "use strict";
 
 
-var compile = __webpack_require__(15)
+var compile = __webpack_require__(13)
 
 var EmptyProc = {
   body: "",
@@ -1007,8 +1007,8 @@ exports.equals = compile({
 /* 6 */
 /***/ (function(module, exports, __webpack_require__) {
 
-var iota = __webpack_require__(23)
-var isBuffer = __webpack_require__(24)
+var iota = __webpack_require__(20)
+var isBuffer = __webpack_require__(21)
 
 var hasTypedArrays  = ((typeof Float64Array) !== "undefined")
 
@@ -1360,7 +1360,7 @@ module.exports = wrappedNDArrayCtor
 /* WEBPACK VAR INJECTION */(function(global, Buffer) {
 
 var bits = __webpack_require__(0)
-var dup = __webpack_require__(18)
+var dup = __webpack_require__(16)
 
 //Legacy pool support
 if(!global.__TYPEDARRAY_POOL) {
@@ -1571,7 +1571,7 @@ exports.clearCache = function clearCache() {
     BUFFER[i].length = 0
   }
 }
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(8), __webpack_require__(14).Buffer))
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(8), __webpack_require__(28).Buffer))
 
 /***/ }),
 /* 8 */
@@ -1627,8 +1627,8 @@ var bits = __webpack_require__(0)
 var pool = __webpack_require__(7)
 var ndarray = __webpack_require__(6)
 var ops = __webpack_require__(5)
-var fft = __webpack_require__(26)
-var hann = __webpack_require__(28)
+var fft = __webpack_require__(22)
+var hann = __webpack_require__(24)
 
 function square(x, y) {
   var n = x.length
@@ -1971,7 +1971,7 @@ Analyzer.prototype = {
 		}
 
 		this.oldFreq = (best ? best.freq : 0.0);
-
+		// console.log(best);
 		if (best && best.freq) {
 			return best.freq;
 		} else {
@@ -2191,7 +2191,7 @@ Analyzer.prototype = {
 
 		if (!RFFT) {
 			try {
-				RFFT = __webpack_require__(21);
+				RFFT = __webpack_require__(19);
 			} catch (e) {
 				throw Error("pitch.js requires fft.js");
 			}
@@ -2414,6 +2414,1659 @@ module.exports = {
 "use strict";
 
 
+var createThunk = __webpack_require__(15)
+
+function Procedure() {
+  this.argTypes = []
+  this.shimArgs = []
+  this.arrayArgs = []
+  this.arrayBlockIndices = []
+  this.scalarArgs = []
+  this.offsetArgs = []
+  this.offsetArgIndex = []
+  this.indexArgs = []
+  this.shapeArgs = []
+  this.funcName = ""
+  this.pre = null
+  this.body = null
+  this.post = null
+  this.debug = false
+}
+
+function compileCwise(user_args) {
+  //Create procedure
+  var proc = new Procedure()
+  
+  //Parse blocks
+  proc.pre    = user_args.pre
+  proc.body   = user_args.body
+  proc.post   = user_args.post
+
+  //Parse arguments
+  var proc_args = user_args.args.slice(0)
+  proc.argTypes = proc_args
+  for(var i=0; i<proc_args.length; ++i) {
+    var arg_type = proc_args[i]
+    if(arg_type === "array" || (typeof arg_type === "object" && arg_type.blockIndices)) {
+      proc.argTypes[i] = "array"
+      proc.arrayArgs.push(i)
+      proc.arrayBlockIndices.push(arg_type.blockIndices ? arg_type.blockIndices : 0)
+      proc.shimArgs.push("array" + i)
+      if(i < proc.pre.args.length && proc.pre.args[i].count>0) {
+        throw new Error("cwise: pre() block may not reference array args")
+      }
+      if(i < proc.post.args.length && proc.post.args[i].count>0) {
+        throw new Error("cwise: post() block may not reference array args")
+      }
+    } else if(arg_type === "scalar") {
+      proc.scalarArgs.push(i)
+      proc.shimArgs.push("scalar" + i)
+    } else if(arg_type === "index") {
+      proc.indexArgs.push(i)
+      if(i < proc.pre.args.length && proc.pre.args[i].count > 0) {
+        throw new Error("cwise: pre() block may not reference array index")
+      }
+      if(i < proc.body.args.length && proc.body.args[i].lvalue) {
+        throw new Error("cwise: body() block may not write to array index")
+      }
+      if(i < proc.post.args.length && proc.post.args[i].count > 0) {
+        throw new Error("cwise: post() block may not reference array index")
+      }
+    } else if(arg_type === "shape") {
+      proc.shapeArgs.push(i)
+      if(i < proc.pre.args.length && proc.pre.args[i].lvalue) {
+        throw new Error("cwise: pre() block may not write to array shape")
+      }
+      if(i < proc.body.args.length && proc.body.args[i].lvalue) {
+        throw new Error("cwise: body() block may not write to array shape")
+      }
+      if(i < proc.post.args.length && proc.post.args[i].lvalue) {
+        throw new Error("cwise: post() block may not write to array shape")
+      }
+    } else if(typeof arg_type === "object" && arg_type.offset) {
+      proc.argTypes[i] = "offset"
+      proc.offsetArgs.push({ array: arg_type.array, offset:arg_type.offset })
+      proc.offsetArgIndex.push(i)
+    } else {
+      throw new Error("cwise: Unknown argument type " + proc_args[i])
+    }
+  }
+  
+  //Make sure at least one array argument was specified
+  if(proc.arrayArgs.length <= 0) {
+    throw new Error("cwise: No array arguments specified")
+  }
+  
+  //Make sure arguments are correct
+  if(proc.pre.args.length > proc_args.length) {
+    throw new Error("cwise: Too many arguments in pre() block")
+  }
+  if(proc.body.args.length > proc_args.length) {
+    throw new Error("cwise: Too many arguments in body() block")
+  }
+  if(proc.post.args.length > proc_args.length) {
+    throw new Error("cwise: Too many arguments in post() block")
+  }
+
+  //Check debug flag
+  proc.debug = !!user_args.printCode || !!user_args.debug
+  
+  //Retrieve name
+  proc.funcName = user_args.funcName || "cwise"
+  
+  //Read in block size
+  proc.blockSize = user_args.blockSize || 64
+
+  return createThunk(proc)
+}
+
+module.exports = compileCwise
+
+
+/***/ }),
+/* 14 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var uniq = __webpack_require__(25)
+
+// This function generates very simple loops analogous to how you typically traverse arrays (the outermost loop corresponds to the slowest changing index, the innermost loop to the fastest changing index)
+// TODO: If two arrays have the same strides (and offsets) there is potential for decreasing the number of "pointers" and related variables. The drawback is that the type signature would become more specific and that there would thus be less potential for caching, but it might still be worth it, especially when dealing with large numbers of arguments.
+function innerFill(order, proc, body) {
+  var dimension = order.length
+    , nargs = proc.arrayArgs.length
+    , has_index = proc.indexArgs.length>0
+    , code = []
+    , vars = []
+    , idx=0, pidx=0, i, j
+  for(i=0; i<dimension; ++i) { // Iteration variables
+    vars.push(["i",i,"=0"].join(""))
+  }
+  //Compute scan deltas
+  for(j=0; j<nargs; ++j) {
+    for(i=0; i<dimension; ++i) {
+      pidx = idx
+      idx = order[i]
+      if(i === 0) { // The innermost/fastest dimension's delta is simply its stride
+        vars.push(["d",j,"s",i,"=t",j,"p",idx].join(""))
+      } else { // For other dimensions the delta is basically the stride minus something which essentially "rewinds" the previous (more inner) dimension
+        vars.push(["d",j,"s",i,"=(t",j,"p",idx,"-s",pidx,"*t",j,"p",pidx,")"].join(""))
+      }
+    }
+  }
+  code.push("var " + vars.join(","))
+  //Scan loop
+  for(i=dimension-1; i>=0; --i) { // Start at largest stride and work your way inwards
+    idx = order[i]
+    code.push(["for(i",i,"=0;i",i,"<s",idx,";++i",i,"){"].join(""))
+  }
+  //Push body of inner loop
+  code.push(body)
+  //Advance scan pointers
+  for(i=0; i<dimension; ++i) {
+    pidx = idx
+    idx = order[i]
+    for(j=0; j<nargs; ++j) {
+      code.push(["p",j,"+=d",j,"s",i].join(""))
+    }
+    if(has_index) {
+      if(i > 0) {
+        code.push(["index[",pidx,"]-=s",pidx].join(""))
+      }
+      code.push(["++index[",idx,"]"].join(""))
+    }
+    code.push("}")
+  }
+  return code.join("\n")
+}
+
+// Generate "outer" loops that loop over blocks of data, applying "inner" loops to the blocks by manipulating the local variables in such a way that the inner loop only "sees" the current block.
+// TODO: If this is used, then the previous declaration (done by generateCwiseOp) of s* is essentially unnecessary.
+//       I believe the s* are not used elsewhere (in particular, I don't think they're used in the pre/post parts and "shape" is defined independently), so it would be possible to make defining the s* dependent on what loop method is being used.
+function outerFill(matched, order, proc, body) {
+  var dimension = order.length
+    , nargs = proc.arrayArgs.length
+    , blockSize = proc.blockSize
+    , has_index = proc.indexArgs.length > 0
+    , code = []
+  for(var i=0; i<nargs; ++i) {
+    code.push(["var offset",i,"=p",i].join(""))
+  }
+  //Generate loops for unmatched dimensions
+  // The order in which these dimensions are traversed is fairly arbitrary (from small stride to large stride, for the first argument)
+  // TODO: It would be nice if the order in which these loops are placed would also be somehow "optimal" (at the very least we should check that it really doesn't hurt us if they're not).
+  for(var i=matched; i<dimension; ++i) {
+    code.push(["for(var j"+i+"=SS[", order[i], "]|0;j", i, ">0;){"].join("")) // Iterate back to front
+    code.push(["if(j",i,"<",blockSize,"){"].join("")) // Either decrease j by blockSize (s = blockSize), or set it to zero (after setting s = j).
+    code.push(["s",order[i],"=j",i].join(""))
+    code.push(["j",i,"=0"].join(""))
+    code.push(["}else{s",order[i],"=",blockSize].join(""))
+    code.push(["j",i,"-=",blockSize,"}"].join(""))
+    if(has_index) {
+      code.push(["index[",order[i],"]=j",i].join(""))
+    }
+  }
+  for(var i=0; i<nargs; ++i) {
+    var indexStr = ["offset"+i]
+    for(var j=matched; j<dimension; ++j) {
+      indexStr.push(["j",j,"*t",i,"p",order[j]].join(""))
+    }
+    code.push(["p",i,"=(",indexStr.join("+"),")"].join(""))
+  }
+  code.push(innerFill(order, proc, body))
+  for(var i=matched; i<dimension; ++i) {
+    code.push("}")
+  }
+  return code.join("\n")
+}
+
+//Count the number of compatible inner orders
+// This is the length of the longest common prefix of the arrays in orders.
+// Each array in orders lists the dimensions of the correspond ndarray in order of increasing stride.
+// This is thus the maximum number of dimensions that can be efficiently traversed by simple nested loops for all arrays.
+function countMatches(orders) {
+  var matched = 0, dimension = orders[0].length
+  while(matched < dimension) {
+    for(var j=1; j<orders.length; ++j) {
+      if(orders[j][matched] !== orders[0][matched]) {
+        return matched
+      }
+    }
+    ++matched
+  }
+  return matched
+}
+
+//Processes a block according to the given data types
+// Replaces variable names by different ones, either "local" ones (that are then ferried in and out of the given array) or ones matching the arguments that the function performing the ultimate loop will accept.
+function processBlock(block, proc, dtypes) {
+  var code = block.body
+  var pre = []
+  var post = []
+  for(var i=0; i<block.args.length; ++i) {
+    var carg = block.args[i]
+    if(carg.count <= 0) {
+      continue
+    }
+    var re = new RegExp(carg.name, "g")
+    var ptrStr = ""
+    var arrNum = proc.arrayArgs.indexOf(i)
+    switch(proc.argTypes[i]) {
+      case "offset":
+        var offArgIndex = proc.offsetArgIndex.indexOf(i)
+        var offArg = proc.offsetArgs[offArgIndex]
+        arrNum = offArg.array
+        ptrStr = "+q" + offArgIndex // Adds offset to the "pointer" in the array
+      case "array":
+        ptrStr = "p" + arrNum + ptrStr
+        var localStr = "l" + i
+        var arrStr = "a" + arrNum
+        if (proc.arrayBlockIndices[arrNum] === 0) { // Argument to body is just a single value from this array
+          if(carg.count === 1) { // Argument/array used only once(?)
+            if(dtypes[arrNum] === "generic") {
+              if(carg.lvalue) {
+                pre.push(["var ", localStr, "=", arrStr, ".get(", ptrStr, ")"].join("")) // Is this necessary if the argument is ONLY used as an lvalue? (keep in mind that we can have a += something, so we would actually need to check carg.rvalue)
+                code = code.replace(re, localStr)
+                post.push([arrStr, ".set(", ptrStr, ",", localStr,")"].join(""))
+              } else {
+                code = code.replace(re, [arrStr, ".get(", ptrStr, ")"].join(""))
+              }
+            } else {
+              code = code.replace(re, [arrStr, "[", ptrStr, "]"].join(""))
+            }
+          } else if(dtypes[arrNum] === "generic") {
+            pre.push(["var ", localStr, "=", arrStr, ".get(", ptrStr, ")"].join("")) // TODO: Could we optimize by checking for carg.rvalue?
+            code = code.replace(re, localStr)
+            if(carg.lvalue) {
+              post.push([arrStr, ".set(", ptrStr, ",", localStr,")"].join(""))
+            }
+          } else {
+            pre.push(["var ", localStr, "=", arrStr, "[", ptrStr, "]"].join("")) // TODO: Could we optimize by checking for carg.rvalue?
+            code = code.replace(re, localStr)
+            if(carg.lvalue) {
+              post.push([arrStr, "[", ptrStr, "]=", localStr].join(""))
+            }
+          }
+        } else { // Argument to body is a "block"
+          var reStrArr = [carg.name], ptrStrArr = [ptrStr]
+          for(var j=0; j<Math.abs(proc.arrayBlockIndices[arrNum]); j++) {
+            reStrArr.push("\\s*\\[([^\\]]+)\\]")
+            ptrStrArr.push("$" + (j+1) + "*t" + arrNum + "b" + j) // Matched index times stride
+          }
+          re = new RegExp(reStrArr.join(""), "g")
+          ptrStr = ptrStrArr.join("+")
+          if(dtypes[arrNum] === "generic") {
+            /*if(carg.lvalue) {
+              pre.push(["var ", localStr, "=", arrStr, ".get(", ptrStr, ")"].join("")) // Is this necessary if the argument is ONLY used as an lvalue? (keep in mind that we can have a += something, so we would actually need to check carg.rvalue)
+              code = code.replace(re, localStr)
+              post.push([arrStr, ".set(", ptrStr, ",", localStr,")"].join(""))
+            } else {
+              code = code.replace(re, [arrStr, ".get(", ptrStr, ")"].join(""))
+            }*/
+            throw new Error("cwise: Generic arrays not supported in combination with blocks!")
+          } else {
+            // This does not produce any local variables, even if variables are used multiple times. It would be possible to do so, but it would complicate things quite a bit.
+            code = code.replace(re, [arrStr, "[", ptrStr, "]"].join(""))
+          }
+        }
+      break
+      case "scalar":
+        code = code.replace(re, "Y" + proc.scalarArgs.indexOf(i))
+      break
+      case "index":
+        code = code.replace(re, "index")
+      break
+      case "shape":
+        code = code.replace(re, "shape")
+      break
+    }
+  }
+  return [pre.join("\n"), code, post.join("\n")].join("\n").trim()
+}
+
+function typeSummary(dtypes) {
+  var summary = new Array(dtypes.length)
+  var allEqual = true
+  for(var i=0; i<dtypes.length; ++i) {
+    var t = dtypes[i]
+    var digits = t.match(/\d+/)
+    if(!digits) {
+      digits = ""
+    } else {
+      digits = digits[0]
+    }
+    if(t.charAt(0) === 0) {
+      summary[i] = "u" + t.charAt(1) + digits
+    } else {
+      summary[i] = t.charAt(0) + digits
+    }
+    if(i > 0) {
+      allEqual = allEqual && summary[i] === summary[i-1]
+    }
+  }
+  if(allEqual) {
+    return summary[0]
+  }
+  return summary.join("")
+}
+
+//Generates a cwise operator
+function generateCWiseOp(proc, typesig) {
+
+  //Compute dimension
+  // Arrays get put first in typesig, and there are two entries per array (dtype and order), so this gets the number of dimensions in the first array arg.
+  var dimension = (typesig[1].length - Math.abs(proc.arrayBlockIndices[0]))|0
+  var orders = new Array(proc.arrayArgs.length)
+  var dtypes = new Array(proc.arrayArgs.length)
+  for(var i=0; i<proc.arrayArgs.length; ++i) {
+    dtypes[i] = typesig[2*i]
+    orders[i] = typesig[2*i+1]
+  }
+  
+  //Determine where block and loop indices start and end
+  var blockBegin = [], blockEnd = [] // These indices are exposed as blocks
+  var loopBegin = [], loopEnd = [] // These indices are iterated over
+  var loopOrders = [] // orders restricted to the loop indices
+  for(var i=0; i<proc.arrayArgs.length; ++i) {
+    if (proc.arrayBlockIndices[i]<0) {
+      loopBegin.push(0)
+      loopEnd.push(dimension)
+      blockBegin.push(dimension)
+      blockEnd.push(dimension+proc.arrayBlockIndices[i])
+    } else {
+      loopBegin.push(proc.arrayBlockIndices[i]) // Non-negative
+      loopEnd.push(proc.arrayBlockIndices[i]+dimension)
+      blockBegin.push(0)
+      blockEnd.push(proc.arrayBlockIndices[i])
+    }
+    var newOrder = []
+    for(var j=0; j<orders[i].length; j++) {
+      if (loopBegin[i]<=orders[i][j] && orders[i][j]<loopEnd[i]) {
+        newOrder.push(orders[i][j]-loopBegin[i]) // If this is a loop index, put it in newOrder, subtracting loopBegin, to make sure that all loopOrders are using a common set of indices.
+      }
+    }
+    loopOrders.push(newOrder)
+  }
+
+  //First create arguments for procedure
+  var arglist = ["SS"] // SS is the overall shape over which we iterate
+  var code = ["'use strict'"]
+  var vars = []
+  
+  for(var j=0; j<dimension; ++j) {
+    vars.push(["s", j, "=SS[", j, "]"].join("")) // The limits for each dimension.
+  }
+  for(var i=0; i<proc.arrayArgs.length; ++i) {
+    arglist.push("a"+i) // Actual data array
+    arglist.push("t"+i) // Strides
+    arglist.push("p"+i) // Offset in the array at which the data starts (also used for iterating over the data)
+    
+    for(var j=0; j<dimension; ++j) { // Unpack the strides into vars for looping
+      vars.push(["t",i,"p",j,"=t",i,"[",loopBegin[i]+j,"]"].join(""))
+    }
+    
+    for(var j=0; j<Math.abs(proc.arrayBlockIndices[i]); ++j) { // Unpack the strides into vars for block iteration
+      vars.push(["t",i,"b",j,"=t",i,"[",blockBegin[i]+j,"]"].join(""))
+    }
+  }
+  for(var i=0; i<proc.scalarArgs.length; ++i) {
+    arglist.push("Y" + i)
+  }
+  if(proc.shapeArgs.length > 0) {
+    vars.push("shape=SS.slice(0)") // Makes the shape over which we iterate available to the user defined functions (so you can use width/height for example)
+  }
+  if(proc.indexArgs.length > 0) {
+    // Prepare an array to keep track of the (logical) indices, initialized to dimension zeroes.
+    var zeros = new Array(dimension)
+    for(var i=0; i<dimension; ++i) {
+      zeros[i] = "0"
+    }
+    vars.push(["index=[", zeros.join(","), "]"].join(""))
+  }
+  for(var i=0; i<proc.offsetArgs.length; ++i) { // Offset arguments used for stencil operations
+    var off_arg = proc.offsetArgs[i]
+    var init_string = []
+    for(var j=0; j<off_arg.offset.length; ++j) {
+      if(off_arg.offset[j] === 0) {
+        continue
+      } else if(off_arg.offset[j] === 1) {
+        init_string.push(["t", off_arg.array, "p", j].join(""))      
+      } else {
+        init_string.push([off_arg.offset[j], "*t", off_arg.array, "p", j].join(""))
+      }
+    }
+    if(init_string.length === 0) {
+      vars.push("q" + i + "=0")
+    } else {
+      vars.push(["q", i, "=", init_string.join("+")].join(""))
+    }
+  }
+
+  //Prepare this variables
+  var thisVars = uniq([].concat(proc.pre.thisVars)
+                      .concat(proc.body.thisVars)
+                      .concat(proc.post.thisVars))
+  vars = vars.concat(thisVars)
+  code.push("var " + vars.join(","))
+  for(var i=0; i<proc.arrayArgs.length; ++i) {
+    code.push("p"+i+"|=0")
+  }
+  
+  //Inline prelude
+  if(proc.pre.body.length > 3) {
+    code.push(processBlock(proc.pre, proc, dtypes))
+  }
+
+  //Process body
+  var body = processBlock(proc.body, proc, dtypes)
+  var matched = countMatches(loopOrders)
+  if(matched < dimension) {
+    code.push(outerFill(matched, loopOrders[0], proc, body)) // TODO: Rather than passing loopOrders[0], it might be interesting to look at passing an order that represents the majority of the arguments for example.
+  } else {
+    code.push(innerFill(loopOrders[0], proc, body))
+  }
+
+  //Inline epilog
+  if(proc.post.body.length > 3) {
+    code.push(processBlock(proc.post, proc, dtypes))
+  }
+  
+  if(proc.debug) {
+    console.log("-----Generated cwise routine for ", typesig, ":\n" + code.join("\n") + "\n----------")
+  }
+  
+  var loopName = [(proc.funcName||"unnamed"), "_cwise_loop_", orders[0].join("s"),"m",matched,typeSummary(dtypes)].join("")
+  var f = new Function(["function ",loopName,"(", arglist.join(","),"){", code.join("\n"),"} return ", loopName].join(""))
+  return f()
+}
+module.exports = generateCWiseOp
+
+
+/***/ }),
+/* 15 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+// The function below is called when constructing a cwise function object, and does the following:
+// A function object is constructed which accepts as argument a compilation function and returns another function.
+// It is this other function that is eventually returned by createThunk, and this function is the one that actually
+// checks whether a certain pattern of arguments has already been used before and compiles new loops as needed.
+// The compilation passed to the first function object is used for compiling new functions.
+// Once this function object is created, it is called with compile as argument, where the first argument of compile
+// is bound to "proc" (essentially containing a preprocessed version of the user arguments to cwise).
+// So createThunk roughly works like this:
+// function createThunk(proc) {
+//   var thunk = function(compileBound) {
+//     var CACHED = {}
+//     return function(arrays and scalars) {
+//       if (dtype and order of arrays in CACHED) {
+//         var func = CACHED[dtype and order of arrays]
+//       } else {
+//         var func = CACHED[dtype and order of arrays] = compileBound(dtype and order of arrays)
+//       }
+//       return func(arrays and scalars)
+//     }
+//   }
+//   return thunk(compile.bind1(proc))
+// }
+
+var compile = __webpack_require__(14)
+
+function createThunk(proc) {
+  var code = ["'use strict'", "var CACHED={}"]
+  var vars = []
+  var thunkName = proc.funcName + "_cwise_thunk"
+  
+  //Build thunk
+  code.push(["return function ", thunkName, "(", proc.shimArgs.join(","), "){"].join(""))
+  var typesig = []
+  var string_typesig = []
+  var proc_args = [["array",proc.arrayArgs[0],".shape.slice(", // Slice shape so that we only retain the shape over which we iterate (which gets passed to the cwise operator as SS).
+                    Math.max(0,proc.arrayBlockIndices[0]),proc.arrayBlockIndices[0]<0?(","+proc.arrayBlockIndices[0]+")"):")"].join("")]
+  var shapeLengthConditions = [], shapeConditions = []
+  // Process array arguments
+  for(var i=0; i<proc.arrayArgs.length; ++i) {
+    var j = proc.arrayArgs[i]
+    vars.push(["t", j, "=array", j, ".dtype,",
+               "r", j, "=array", j, ".order"].join(""))
+    typesig.push("t" + j)
+    typesig.push("r" + j)
+    string_typesig.push("t"+j)
+    string_typesig.push("r"+j+".join()")
+    proc_args.push("array" + j + ".data")
+    proc_args.push("array" + j + ".stride")
+    proc_args.push("array" + j + ".offset|0")
+    if (i>0) { // Gather conditions to check for shape equality (ignoring block indices)
+      shapeLengthConditions.push("array" + proc.arrayArgs[0] + ".shape.length===array" + j + ".shape.length+" + (Math.abs(proc.arrayBlockIndices[0])-Math.abs(proc.arrayBlockIndices[i])))
+      shapeConditions.push("array" + proc.arrayArgs[0] + ".shape[shapeIndex+" + Math.max(0,proc.arrayBlockIndices[0]) + "]===array" + j + ".shape[shapeIndex+" + Math.max(0,proc.arrayBlockIndices[i]) + "]")
+    }
+  }
+  // Check for shape equality
+  if (proc.arrayArgs.length > 1) {
+    code.push("if (!(" + shapeLengthConditions.join(" && ") + ")) throw new Error('cwise: Arrays do not all have the same dimensionality!')")
+    code.push("for(var shapeIndex=array" + proc.arrayArgs[0] + ".shape.length-" + Math.abs(proc.arrayBlockIndices[0]) + "; shapeIndex-->0;) {")
+    code.push("if (!(" + shapeConditions.join(" && ") + ")) throw new Error('cwise: Arrays do not all have the same shape!')")
+    code.push("}")
+  }
+  // Process scalar arguments
+  for(var i=0; i<proc.scalarArgs.length; ++i) {
+    proc_args.push("scalar" + proc.scalarArgs[i])
+  }
+  // Check for cached function (and if not present, generate it)
+  vars.push(["type=[", string_typesig.join(","), "].join()"].join(""))
+  vars.push("proc=CACHED[type]")
+  code.push("var " + vars.join(","))
+  
+  code.push(["if(!proc){",
+             "CACHED[type]=proc=compile([", typesig.join(","), "])}",
+             "return proc(", proc_args.join(","), ")}"].join(""))
+
+  if(proc.debug) {
+    console.log("-----Generated thunk:\n" + code.join("\n") + "\n----------")
+  }
+  
+  //Compile thunk
+  var thunk = new Function("compile", code.join("\n"))
+  return thunk(compile.bind(undefined, proc))
+}
+
+module.exports = createThunk
+
+
+/***/ }),
+/* 16 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+function dupe_array(count, value, i) {
+  var c = count[i]|0
+  if(c <= 0) {
+    return []
+  }
+  var result = new Array(c), j
+  if(i === count.length-1) {
+    for(j=0; j<c; ++j) {
+      result[j] = value
+    }
+  } else {
+    for(j=0; j<c; ++j) {
+      result[j] = dupe_array(count, value, i+1)
+    }
+  }
+  return result
+}
+
+function dupe_number(count, value) {
+  var result, i
+  result = new Array(count)
+  for(i=0; i<count; ++i) {
+    result[i] = value
+  }
+  return result
+}
+
+function dupe(count, value) {
+  if(typeof value === "undefined") {
+    value = 0
+  }
+  switch(typeof count) {
+    case "number":
+      if(count > 0) {
+        return dupe_number(count|0, value)
+      }
+    break
+    case "object":
+      if(typeof (count.length) === "number") {
+        return dupe_array(count, value, 0)
+      }
+    break
+  }
+  return []
+}
+
+module.exports = dupe
+
+/***/ }),
+/* 17 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/*===========================================================================*\
+ * Discrete Fourier Transform (O(n^2) brute-force method)
+ *
+ * (c) Vail Systems. Joshua Jung and Ben Bryan. 2015
+ *
+ * This code is not designed to be highly optimized but as an educational
+ * tool to understand the Fast Fourier Transform.
+\*===========================================================================*/
+
+//------------------------------------------------
+// Note: this code is not optimized and is
+// primarily designed as an educational and testing
+// tool.
+//------------------------------------------------
+var complex = __webpack_require__(1);
+var fftUtil = __webpack_require__(3);
+
+//-------------------------------------------------
+// Calculate brute-force O(n^2) DFT for vector.
+//-------------------------------------------------
+var dft = function(vector) {
+  var X = [],
+      N = vector.length;
+
+  for (var k = 0; k < N; k++) {
+    X[k] = [0, 0]; //Initialize to a 0-valued complex number.
+
+    for (var i = 0; i < N; i++) {
+      var exp = fftUtil.exponent(k * i, N);
+      var term = complex.multiply([vector[i], 0], exp); //Complex mult of the signal with the exponential term.
+      X[k] = complex.add(X[k], term); //Complex summation of X[k] and exponential
+    }
+  }
+
+  return X;
+};
+
+module.exports = dft;
+
+/***/ }),
+/* 18 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/*===========================================================================*\
+ * Inverse Fast Fourier Transform (Cooley-Tukey Method)
+ *
+ * (c) Maximilian Bügler. 2016
+ *
+ * Based on and using the code by
+ * (c) Vail Systems. Joshua Jung and Ben Bryan. 2015
+ *
+ * This code is not designed to be highly optimized but as an educational
+ * tool to understand the Fast Fourier Transform.
+\*===========================================================================*/
+
+//------------------------------------------------
+// Note: Some of this code is not optimized and is
+// primarily designed as an educational and testing
+// tool.
+// To get high performace would require transforming
+// the recursive calls into a loop and then loop
+// unrolling. All of this is best accomplished
+// in C or assembly.
+//-------------------------------------------------
+
+//-------------------------------------------------
+// The following code assumes a complex number is
+// an array: [real, imaginary]
+//-------------------------------------------------
+
+var fft = __webpack_require__(2).fft;
+
+
+module.exports = {
+    ifft: function ifft(signal){
+        //Interchange real and imaginary parts
+        var csignal=[];
+        for(var i=0; i<signal.length; i++){
+            csignal[i]=[signal[i][1], signal[i][0]];
+        }
+    
+        //Apply fft
+        var ps=fft(csignal);
+        
+        //Interchange real and imaginary parts and normalize
+        var res=[];
+        for(var j=0; j<ps.length; j++){
+            res[j]=[ps[j][1]/ps.length, ps[j][0]/ps.length];
+        }
+        return res;
+    }
+};
+
+
+/***/ }),
+/* 19 */
+/***/ (function(module, exports) {
+
+/* Copyright (c) 2012, Jens Nockert <jens@ofmlabs.org>, Jussi Kalliokoski <jussi@ofmlabs.org>
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met: 
+ * 
+ * 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. 
+ * 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution. 
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+if (!FFT) {
+	var FFT = {}
+}
+
+void function (namespace) {
+	"use strict"
+	
+	function butterfly2(output, outputOffset, outputStride, fStride, state, m) {
+		var t = state.twiddle
+		
+		for (var i = 0; i < m; i++) {
+			var s0_r = output[2 * ((outputOffset) + (outputStride) * (i))], s0_i = output[2 * ((outputOffset) + (outputStride) * (i)) + 1]
+			var s1_r = output[2 * ((outputOffset) + (outputStride) * (i + m))], s1_i = output[2 * ((outputOffset) + (outputStride) * (i + m)) + 1]
+			
+			var t1_r = t[2 * ((0) + (fStride) * (i))], t1_i = t[2 * ((0) + (fStride) * (i)) + 1]
+			
+			var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
+			
+			var r0_r = s0_r + v1_r, r0_i = s0_i + v1_i
+			var r1_r = s0_r - v1_r, r1_i = s0_i - v1_i
+			
+			output[2 * ((outputOffset) + (outputStride) * (i))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = r0_i
+			output[2 * ((outputOffset) + (outputStride) * (i + m))] = r1_r, output[2 * ((outputOffset) + (outputStride) * (i + m)) + 1] = r1_i
+		}
+	}
+	
+	function butterfly3(output, outputOffset, outputStride, fStride, state, m) {
+		var t = state.twiddle
+		var m1 = m, m2 = 2 * m
+		var fStride1 = fStride, fStride2 = 2 * fStride
+		
+		var e = t[2 * ((0) + (fStride) * (m)) + 1]
+		
+		for (var i = 0; i < m; i++) {
+			var s0_r = output[2 * ((outputOffset) + (outputStride) * (i))], s0_i = output[2 * ((outputOffset) + (outputStride) * (i)) + 1]
+			
+			var s1_r = output[2 * ((outputOffset) + (outputStride) * (i + m1))], s1_i = output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1]
+			var t1_r = t[2 * ((0) + (fStride1) * (i))], t1_i = t[2 * ((0) + (fStride1) * (i)) + 1]
+			var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
+			
+			var s2_r = output[2 * ((outputOffset) + (outputStride) * (i + m2))], s2_i = output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1]
+			var t2_r = t[2 * ((0) + (fStride2) * (i))], t2_i = t[2 * ((0) + (fStride2) * (i)) + 1]
+			var v2_r = s2_r * t2_r - s2_i * t2_i, v2_i = s2_r * t2_i + s2_i * t2_r
+			
+			var i0_r = v1_r + v2_r, i0_i = v1_i + v2_i
+			
+			var r0_r = s0_r + i0_r, r0_i = s0_i + i0_i
+			output[2 * ((outputOffset) + (outputStride) * (i))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = r0_i
+			
+			var i1_r = s0_r - i0_r * 0.5
+			var i1_i = s0_i - i0_i * 0.5
+			
+			var i2_r = (v1_r - v2_r) * e
+			var i2_i = (v1_i - v2_i) * e
+			
+			var r1_r = i1_r - i2_i
+			var r1_i = i1_i + i2_r
+			output[2 * ((outputOffset) + (outputStride) * (i + m1))] = r1_r, output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1] = r1_i
+			
+			var r2_r = i1_r + i2_i
+			var r2_i = i1_i - i2_r
+			output[2 * ((outputOffset) + (outputStride) * (i + m2))] = r2_r, output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1] = r2_i
+		}
+	}
+	
+	function butterfly4(output, outputOffset, outputStride, fStride, state, m) {
+		var t = state.twiddle
+		var m1 = m, m2 = 2 * m, m3 = 3 * m
+		var fStride1 = fStride, fStride2 = 2 * fStride, fStride3 = 3 * fStride
+		
+		for (var i = 0; i < m; i++) {
+			var s0_r = output[2 * ((outputOffset) + (outputStride) * (i))], s0_i = output[2 * ((outputOffset) + (outputStride) * (i)) + 1]
+			
+			var s1_r = output[2 * ((outputOffset) + (outputStride) * (i + m1))], s1_i = output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1]
+			var t1_r = t[2 * ((0) + (fStride1) * (i))], t1_i = t[2 * ((0) + (fStride1) * (i)) + 1]
+			var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
+			
+			var s2_r = output[2 * ((outputOffset) + (outputStride) * (i + m2))], s2_i = output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1]
+			var t2_r = t[2 * ((0) + (fStride2) * (i))], t2_i = t[2 * ((0) + (fStride2) * (i)) + 1]
+			var v2_r = s2_r * t2_r - s2_i * t2_i, v2_i = s2_r * t2_i + s2_i * t2_r
+			
+			var s3_r = output[2 * ((outputOffset) + (outputStride) * (i + m3))], s3_i = output[2 * ((outputOffset) + (outputStride) * (i + m3)) + 1]
+			var t3_r = t[2 * ((0) + (fStride3) * (i))], t3_i = t[2 * ((0) + (fStride3) * (i)) + 1]
+			var v3_r = s3_r * t3_r - s3_i * t3_i, v3_i = s3_r * t3_i + s3_i * t3_r
+			
+			var i0_r = s0_r + v2_r, i0_i = s0_i + v2_i
+			var i1_r = s0_r - v2_r, i1_i = s0_i - v2_i
+			var i2_r = v1_r + v3_r, i2_i = v1_i + v3_i
+			var i3_r = v1_r - v3_r, i3_i = v1_i - v3_i
+			
+			var r0_r = i0_r + i2_r, r0_i = i0_i + i2_i
+			
+			if (state.inverse) {
+				var r1_r = i1_r - i3_i
+				var r1_i = i1_i + i3_r
+			} else {
+				var r1_r = i1_r + i3_i
+				var r1_i = i1_i - i3_r
+			}
+			
+			var r2_r = i0_r - i2_r, r2_i = i0_i - i2_i
+			
+			if (state.inverse) {
+				var r3_r = i1_r + i3_i
+				var r3_i = i1_i - i3_r
+			} else {
+				var r3_r = i1_r - i3_i
+				var r3_i = i1_i + i3_r
+			}
+			
+			output[2 * ((outputOffset) + (outputStride) * (i))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = r0_i
+			output[2 * ((outputOffset) + (outputStride) * (i + m1))] = r1_r, output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1] = r1_i
+			output[2 * ((outputOffset) + (outputStride) * (i + m2))] = r2_r, output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1] = r2_i
+			output[2 * ((outputOffset) + (outputStride) * (i + m3))] = r3_r, output[2 * ((outputOffset) + (outputStride) * (i + m3)) + 1] = r3_i
+		}
+	}
+	
+	function butterfly(output, outputOffset, outputStride, fStride, state, m, p) {
+		var t = state.twiddle, n = state.n, scratch = new Float64Array(2 * p)
+		
+		for (var u = 0; u < m; u++) {
+			for (var q1 = 0, k = u; q1 < p; q1++, k += m) {
+				var x0_r = output[2 * ((outputOffset) + (outputStride) * (k))], x0_i = output[2 * ((outputOffset) + (outputStride) * (k)) + 1]
+				scratch[2 * (q1)] = x0_r, scratch[2 * (q1) + 1] = x0_i
+			}
+			
+			for (var q1 = 0, k = u; q1 < p; q1++, k += m) {
+				var tOffset = 0
+				
+				var x0_r = scratch[2 * (0)], x0_i = scratch[2 * (0) + 1]
+				output[2 * ((outputOffset) + (outputStride) * (k))] = x0_r, output[2 * ((outputOffset) + (outputStride) * (k)) + 1] = x0_i
+				
+				for (var q = 1; q < p; q++) {
+					tOffset = (tOffset + fStride * k) % n
+					
+					var s0_r = output[2 * ((outputOffset) + (outputStride) * (k))], s0_i = output[2 * ((outputOffset) + (outputStride) * (k)) + 1]
+					
+					var s1_r = scratch[2 * (q)], s1_i = scratch[2 * (q) + 1]
+					var t1_r = t[2 * (tOffset)], t1_i = t[2 * (tOffset) + 1]
+					var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
+					
+					var r0_r = s0_r + v1_r, r0_i = s0_i + v1_i
+					output[2 * ((outputOffset) + (outputStride) * (k))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (k)) + 1] = r0_i
+				}
+			}
+		}
+	}
+	
+	function work(output, outputOffset, outputStride, f, fOffset, fStride, inputStride, factors, state) {
+		var p = factors.shift()
+		var m = factors.shift()
+		
+		if (m == 1) {
+			for (var i = 0; i < p * m; i++) {
+				var x0_r = f[2 * ((fOffset) + (fStride * inputStride) * (i))], x0_i = f[2 * ((fOffset) + (fStride * inputStride) * (i)) + 1]
+				output[2 * ((outputOffset) + (outputStride) * (i))] = x0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = x0_i
+			}
+		} else {
+			for (var i = 0; i < p; i++) {
+				work(output, outputOffset + outputStride * i * m, outputStride, f, fOffset + i * fStride * inputStride, fStride * p, inputStride, factors.slice(), state)
+			}
+		}
+		
+		switch (p) {
+			case 2: butterfly2(output, outputOffset, outputStride, fStride, state, m); break
+			case 3: butterfly3(output, outputOffset, outputStride, fStride, state, m); break
+			case 4: butterfly4(output, outputOffset, outputStride, fStride, state, m); break
+			default: butterfly(output, outputOffset, outputStride, fStride, state, m, p); break
+		}
+	}
+	
+	var complex = function (n, inverse) {
+		var n = ~~n, inverse = !!inverse
+		
+		if (n < 1) {
+			throw new RangeError("n is outside range, should be positive integer, was `" + n + "'")
+		}
+		
+		var state = {
+			n: n,
+			inverse: inverse,
+			
+			factors: [],
+			twiddle: new Float64Array(2 * n),
+			scratch: new Float64Array(2 * n)
+		}
+		
+		var t = state.twiddle, theta = 2 * Math.PI / n
+		
+		for (var i = 0; i < n; i++) {
+			if (inverse) {
+				var phase =  theta * i
+			} else {
+				var phase = -theta * i
+			}
+			
+			t[2 * (i)] = Math.cos(phase)
+			t[2 * (i) + 1] = Math.sin(phase)
+		}
+		
+		var p = 4, v = Math.floor(Math.sqrt(n))
+		
+		while (n > 1) {
+			while (n % p) {
+				switch (p) {
+					case 4: p = 2; break
+					case 2: p = 3; break
+					default: p += 2; break
+				}
+				
+				if (p > v) {
+					p = n
+				}
+			}
+			
+			n /= p
+			
+			state.factors.push(p)
+			state.factors.push(n)
+		}
+		
+		this.state = state
+	}
+	
+	complex.prototype.simple = function (output, input, t) {
+		this.process(output, 0, 1, input, 0, 1, t)
+	}
+	
+	complex.prototype.process = function(output, outputOffset, outputStride, input, inputOffset, inputStride, t) {
+		var outputStride = ~~outputStride, inputStride = ~~inputStride
+		
+		var type = t == 'real' ? t : 'complex'
+		
+		if (outputStride < 1) {
+			throw new RangeError("outputStride is outside range, should be positive integer, was `" + outputStride + "'")
+		}
+		
+		if (inputStride < 1) {
+			throw new RangeError("inputStride is outside range, should be positive integer, was `" + inputStride + "'")
+		}
+		
+		if (type == 'real') {
+			for (var i = 0; i < this.state.n; i++) {
+				var x0_r = input[inputOffset + inputStride * i]
+				var x0_i = 0.0
+				
+				this.state.scratch[2 * (i)] = x0_r, this.state.scratch[2 * (i) + 1] = x0_i
+			}
+			
+			work(output, outputOffset, outputStride, this.state.scratch, 0, 1, 1, this.state.factors.slice(), this.state)
+		} else {
+			if (input == output) {
+				work(this.state.scratch, 0, 1, input, inputOffset, 1, inputStride, this.state.factors.slice(), this.state)
+				
+				for (var i = 0; i < this.state.n; i++) {
+					var x0_r = this.state.scratch[2 * (i)], x0_i = this.state.scratch[2 * (i) + 1]
+					
+					output[2 * ((outputOffset) + (outputStride) * (i))] = x0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = x0_i
+				}
+			} else {
+				work(output, outputOffset, outputStride, input, inputOffset, 1, inputStride, this.state.factors.slice(), this.state)
+			}
+		}
+	}
+	
+	namespace.complex = complex
+}(FFT)
+
+module.exports = FFT
+
+/***/ }),
+/* 20 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+function iota(n) {
+  var result = new Array(n)
+  for(var i=0; i<n; ++i) {
+    result[i] = i
+  }
+  return result
+}
+
+module.exports = iota
+
+/***/ }),
+/* 21 */
+/***/ (function(module, exports) {
+
+/*!
+ * Determine if an object is a Buffer
+ *
+ * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @license  MIT
+ */
+
+// The _isBuffer check is for Safari 5-7 support, because it's missing
+// Object.prototype.constructor. Remove this eventually
+module.exports = function (obj) {
+  return obj != null && (isBuffer(obj) || isSlowBuffer(obj) || !!obj._isBuffer)
+}
+
+function isBuffer (obj) {
+  return !!obj.constructor && typeof obj.constructor.isBuffer === 'function' && obj.constructor.isBuffer(obj)
+}
+
+// For Node v0.10 support. Remove this eventually.
+function isSlowBuffer (obj) {
+  return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isBuffer(obj.slice(0, 0))
+}
+
+
+/***/ }),
+/* 22 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var ops = __webpack_require__(5)
+var ndarray = __webpack_require__(6)
+var pool = __webpack_require__(7)
+var fftm = __webpack_require__(23)
+
+function ndfft(dir, x, y) {
+  var shape = x.shape
+    , d = shape.length
+    , size = 1
+    , stride = new Array(d)
+    , pad = 0
+    , i, j
+  for(i=d-1; i>=0; --i) {
+    stride[i] = size
+    size *= shape[i]
+    pad = Math.max(pad, fftm.scratchMemory(shape[i]))
+    if(x.shape[i] !== y.shape[i]) {
+      throw new Error('Shape mismatch, real and imaginary arrays must have same size')
+    }
+  }
+  var buf_size = 4 * size + pad
+  var buffer
+  if( x.dtype === 'array' ||
+      x.dtype === 'float64' ||
+      x.dtype === 'custom' ) {
+    buffer = pool.mallocDouble(buf_size)
+  } else {
+    buffer = pool.mallocFloat(buf_size)
+  }
+  var x1 = ndarray(buffer, shape.slice(0), stride, 0)
+    , y1 = ndarray(buffer, shape.slice(0), stride.slice(0), size)
+    , x2 = ndarray(buffer, shape.slice(0), stride.slice(0), 2*size)
+    , y2 = ndarray(buffer, shape.slice(0), stride.slice(0), 3*size)
+    , tmp, n, s1, s2
+    , scratch_ptr = 4 * size
+  
+  //Copy into x1/y1
+  ops.assign(x1, x)
+  ops.assign(y1, y)
+  
+  for(i=d-1; i>=0; --i) {
+    fftm(dir, size/shape[i], shape[i], buffer, x1.offset, y1.offset, scratch_ptr)
+    if(i === 0) {
+      break
+    }
+    
+    //Compute new stride for x2/y2
+    n = 1
+    s1 = x2.stride
+    s2 = y2.stride
+    for(j=i-1; j<d; ++j) {
+      s2[j] = s1[j] = n
+      n *= shape[j]
+    }
+    for(j=i-2; j>=0; --j) {
+      s2[j] = s1[j] = n
+      n *= shape[j]
+    }
+    
+    //Transpose
+    ops.assign(x2, x1)
+    ops.assign(y2, y1)
+    
+    //Swap buffers
+    tmp = x1
+    x1 = x2
+    x2 = tmp
+    tmp = y1
+    y1 = y2
+    y2 = tmp
+  }
+  
+  //Copy result back into x
+  ops.assign(x, x1)
+  ops.assign(y, y1)
+  
+  pool.free(buffer)
+}
+
+module.exports = ndfft
+
+/***/ }),
+/* 23 */
+/***/ (function(module, exports, __webpack_require__) {
+
+var bits = __webpack_require__(0)
+
+function fft(dir, nrows, ncols, buffer, x_ptr, y_ptr, scratch_ptr) {
+  dir |= 0
+  nrows |= 0
+  ncols |= 0
+  x_ptr |= 0
+  y_ptr |= 0
+  if(bits.isPow2(ncols)) {
+    fftRadix2(dir, nrows, ncols, buffer, x_ptr, y_ptr)
+  } else {
+    fftBluestein(dir, nrows, ncols, buffer, x_ptr, y_ptr, scratch_ptr)
+  }
+}
+module.exports = fft
+
+function scratchMemory(n) {
+  if(bits.isPow2(n)) {
+    return 0
+  }
+  return 2 * n + 4 * bits.nextPow2(2*n + 1)
+}
+module.exports.scratchMemory = scratchMemory
+
+
+//Radix 2 FFT Adapted from Paul Bourke's C Implementation
+function fftRadix2(dir, nrows, ncols, buffer, x_ptr, y_ptr) {
+  dir |= 0
+  nrows |= 0
+  ncols |= 0
+  x_ptr |= 0
+  y_ptr |= 0
+  var nn,m,i,i1,j,k,i2,l,l1,l2
+  var c1,c2,t,t1,t2,u1,u2,z,row,a,b,c,d,k1,k2,k3
+  
+  // Calculate the number of points
+  nn = ncols
+  m = bits.log2(nn)
+  
+  for(row=0; row<nrows; ++row) {  
+    // Do the bit reversal
+    i2 = nn >> 1;
+    j = 0;
+    for(i=0;i<nn-1;i++) {
+      if(i < j) {
+        t = buffer[x_ptr+i]
+        buffer[x_ptr+i] = buffer[x_ptr+j]
+        buffer[x_ptr+j] = t
+        t = buffer[y_ptr+i]
+        buffer[y_ptr+i] = buffer[y_ptr+j]
+        buffer[y_ptr+j] = t
+      }
+      k = i2
+      while(k <= j) {
+        j -= k
+        k >>= 1
+      }
+      j += k
+    }
+    
+    // Compute the FFT
+    c1 = -1.0
+    c2 = 0.0
+    l2 = 1
+    for(l=0;l<m;l++) {
+      l1 = l2
+      l2 <<= 1
+      u1 = 1.0
+      u2 = 0.0
+      for(j=0;j<l1;j++) {
+        for(i=j;i<nn;i+=l2) {
+          i1 = i + l1
+          a = buffer[x_ptr+i1]
+          b = buffer[y_ptr+i1]
+          c = buffer[x_ptr+i]
+          d = buffer[y_ptr+i]
+          k1 = u1 * (a + b)
+          k2 = a * (u2 - u1)
+          k3 = b * (u1 + u2)
+          t1 = k1 - k3
+          t2 = k1 + k2
+          buffer[x_ptr+i1] = c - t1
+          buffer[y_ptr+i1] = d - t2
+          buffer[x_ptr+i] += t1
+          buffer[y_ptr+i] += t2
+        }
+        k1 = c1 * (u1 + u2)
+        k2 = u1 * (c2 - c1)
+        k3 = u2 * (c1 + c2)
+        u1 = k1 - k3
+        u2 = k1 + k2
+      }
+      c2 = Math.sqrt((1.0 - c1) / 2.0)
+      if(dir < 0) {
+        c2 = -c2
+      }
+      c1 = Math.sqrt((1.0 + c1) / 2.0)
+    }
+    
+    // Scaling for inverse transform
+    if(dir < 0) {
+      var scale_f = 1.0 / nn
+      for(i=0;i<nn;i++) {
+        buffer[x_ptr+i] *= scale_f
+        buffer[y_ptr+i] *= scale_f
+      }
+    }
+    
+    // Advance pointers
+    x_ptr += ncols
+    y_ptr += ncols
+  }
+}
+
+// Use Bluestein algorithm for npot FFTs
+// Scratch memory required:  2 * ncols + 4 * bits.nextPow2(2*ncols + 1)
+function fftBluestein(dir, nrows, ncols, buffer, x_ptr, y_ptr, scratch_ptr) {
+  dir |= 0
+  nrows |= 0
+  ncols |= 0
+  x_ptr |= 0
+  y_ptr |= 0
+  scratch_ptr |= 0
+
+  // Initialize tables
+  var m = bits.nextPow2(2 * ncols + 1)
+    , cos_ptr = scratch_ptr
+    , sin_ptr = cos_ptr + ncols
+    , xs_ptr  = sin_ptr + ncols
+    , ys_ptr  = xs_ptr  + m
+    , cft_ptr = ys_ptr  + m
+    , sft_ptr = cft_ptr + m
+    , w = -dir * Math.PI / ncols
+    , row, a, b, c, d, k1, k2, k3
+    , i
+  for(i=0; i<ncols; ++i) {
+    a = w * ((i * i) % (ncols * 2))
+    c = Math.cos(a)
+    d = Math.sin(a)
+    buffer[cft_ptr+(m-i)] = buffer[cft_ptr+i] = buffer[cos_ptr+i] = c
+    buffer[sft_ptr+(m-i)] = buffer[sft_ptr+i] = buffer[sin_ptr+i] = d
+  }
+  for(i=ncols; i<=m-ncols; ++i) {
+    buffer[cft_ptr+i] = 0.0
+  }
+  for(i=ncols; i<=m-ncols; ++i) {
+    buffer[sft_ptr+i] = 0.0
+  }
+
+  fftRadix2(1, 1, m, buffer, cft_ptr, sft_ptr)
+  
+  //Compute scale factor
+  if(dir < 0) {
+    w = 1.0 / ncols
+  } else {
+    w = 1.0
+  }
+  
+  //Handle direction
+  for(row=0; row<nrows; ++row) {
+  
+    // Copy row into scratch memory, multiply weights
+    for(i=0; i<ncols; ++i) {
+      a = buffer[x_ptr+i]
+      b = buffer[y_ptr+i]
+      c = buffer[cos_ptr+i]
+      d = -buffer[sin_ptr+i]
+      k1 = c * (a + b)
+      k2 = a * (d - c)
+      k3 = b * (c + d)
+      buffer[xs_ptr+i] = k1 - k3
+      buffer[ys_ptr+i] = k1 + k2
+    }
+    //Zero out the rest
+    for(i=ncols; i<m; ++i) {
+      buffer[xs_ptr+i] = 0.0
+    }
+    for(i=ncols; i<m; ++i) {
+      buffer[ys_ptr+i] = 0.0
+    }
+    
+    // FFT buffer
+    fftRadix2(1, 1, m, buffer, xs_ptr, ys_ptr)
+    
+    // Apply multiplier
+    for(i=0; i<m; ++i) {
+      a = buffer[xs_ptr+i]
+      b = buffer[ys_ptr+i]
+      c = buffer[cft_ptr+i]
+      d = buffer[sft_ptr+i]
+      k1 = c * (a + b)
+      k2 = a * (d - c)
+      k3 = b * (c + d)
+      buffer[xs_ptr+i] = k1 - k3
+      buffer[ys_ptr+i] = k1 + k2
+    }
+    
+    // Inverse FFT buffer
+    fftRadix2(-1, 1, m, buffer, xs_ptr, ys_ptr)
+    
+    // Copy result back into x/y
+    for(i=0; i<ncols; ++i) {
+      a = buffer[xs_ptr+i]
+      b = buffer[ys_ptr+i]
+      c = buffer[cos_ptr+i]
+      d = -buffer[sin_ptr+i]
+      k1 = c * (a + b)
+      k2 = a * (d - c)
+      k3 = b * (c + d)
+      buffer[x_ptr+i] = w * (k1 - k3)
+      buffer[y_ptr+i] = w * (k1 + k2)
+    }
+    
+    x_ptr += ncols
+    y_ptr += ncols
+  }
+}
+
+
+/***/ }),
+/* 24 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+function hann (i,N) {
+  return 0.5*(1 - Math.cos(6.283185307179586*i/(N-1)))
+}
+
+module.exports = hann
+
+
+/***/ }),
+/* 25 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+function unique_pred(list, compare) {
+  var ptr = 1
+    , len = list.length
+    , a=list[0], b=list[0]
+  for(var i=1; i<len; ++i) {
+    b = a
+    a = list[i]
+    if(compare(a, b)) {
+      if(i === ptr) {
+        ptr++
+        continue
+      }
+      list[ptr++] = a
+    }
+  }
+  list.length = ptr
+  return list
+}
+
+function unique_eq(list) {
+  var ptr = 1
+    , len = list.length
+    , a=list[0], b = list[0]
+  for(var i=1; i<len; ++i, b=a) {
+    b = a
+    a = list[i]
+    if(a !== b) {
+      if(i === ptr) {
+        ptr++
+        continue
+      }
+      list[ptr++] = a
+    }
+  }
+  list.length = ptr
+  return list
+}
+
+function unique(list, compare, sorted) {
+  if(list.length === 0) {
+    return list
+  }
+  if(compare) {
+    if(!sorted) {
+      list.sort(compare)
+    }
+    return unique_pred(list, compare)
+  }
+  if(!sorted) {
+    list.sort()
+  }
+  return unique_eq(list)
+}
+
+module.exports = unique
+
+
+/***/ }),
+/* 26 */
+/***/ (function(module, exports, __webpack_require__) {
+
+const PitchAnalyzer = __webpack_require__(11);
+const context = new (window.AudioContext || window.webkitAudioContext)();
+const detectPitch = __webpack_require__(10);
+const timeseries = __webpack_require__(32);
+const autocorrelation = __webpack_require__(9).autocorrelation;
+
+
+console.log(PitchAnalyzer);
+
+let pitch = new PitchAnalyzer(44100); 
+let sourceNode;
+var audioBuffer;
+var javascriptNode;
+var acf;
+
+
+// loadSound("sandwich.mp3");
+function setupAudioNodes() {
+
+    javascriptNode = context.createScriptProcessor(2048, 1, 1);
+
+    javascriptNode.connect(context.destination);
+
+}
+setupAudioNodes();
+
+// function getData() {
+// 	sourceNode = context.createBufferSource();
+
+// 	let promise = new Promise(function(resolve, reject) {
+
+// 		var request = new XMLHttpRequest();
+
+// 		request.open('GET', 'marcCow.wav', true);
+
+// 		request.responseType = 'arraybuffer';
+
+// 		request.onload = function() {
+// 			var audioData = request.response;
+
+// 			context.decodeAudioData(audioData, function(buffer) {
+// 				sourceNode.buffer = buffer;
+// 				resolve(sourceNode);
+// 			},
+
+// 			function(e) { 
+// 				reject();
+// 			});
+// 		}
+// 		request.send();
+// 	});
+
+// 	promise.then(sourceNode => {
+// 		audioBuffer = sourceNode.buffer.getChannelData(0);
+
+// 		let increment = audioBuffer.length / 4096; 
+
+// 		let n = increment + 1;
+
+// 		let semiresult = [];
+// 		let abbreviated = ['abbreviated:'];
+
+// 		while (n < audioBuffer.length) {
+// 			let testBuffer = audioBuffer.slice(n - increment, n);
+// 			pitch.input(testBuffer);
+// 			pitch.process();
+
+// 			var tone = pitch.findTone();
+// 			semiresult.push(tone);
+
+// 			if (tone !== abbreviated[abbreviated.length - 1]) {
+// 				abbreviated.push(tone)
+// 			}
+// 			n += increment;
+// 		}
+
+// 		// let unique = abbreviated.filter(elem => {
+// 		// 	if (!isNaN(elem)) return elem;
+// 		// }).map(num => Math.floor(num));
+// 		let unique = abbreviated.map(elem => {
+// 			if (elem === null) {
+// 				return 0
+// 			} else {
+// 				return Math.floor(elem)
+// 			}
+// 		}).slice(1); // the `.slice(1)` because the abbreviated function is all messed up
+
+// 		console.log(unique);
+// 		return unique;
+// 	});
+// };
+
+// let frequencies = getData();
+
+
+//##########################################################################################################//
+//##########################################################################################################//
+//																																																					//
+//																					TIME SERIES ANALYSIS																						//
+//																																																					//
+//##########################################################################################################//
+//##########################################################################################################//
+
+// EVERYTHING IS BUILD ON THE PROMISE CHAIN...
+
+function getData() {
+	sourceNode = context.createBufferSource();
+
+	let promise = new Promise(function(resolve, reject) {
+
+		var request = new XMLHttpRequest();
+
+		request.open('GET', 'marcOW.wav', true);
+
+		request.responseType = 'arraybuffer';
+
+		request.onload = function() {
+			var audioData = request.response;
+
+			context.decodeAudioData(audioData, function(buffer) {
+				sourceNode.buffer = buffer;
+				resolve(sourceNode);
+			},
+
+			function(e) { 
+				reject();
+			});
+		}
+		request.send();
+	});
+
+	promise.then(sourceNode => {
+		// audio data is made using a sampling rate of 44,100 Hz.
+		audioBuffer = sourceNode.buffer.getChannelData(0);
+		console.log(audioBuffer.length)
+		console.log(audioBuffer)
+		// the increment is our BIN: 
+		// we pass our bin to `pitch.js`s `findTone()` function`
+		// according to Mark's paper, a good bin for a low-freq speaker needs to have ~150 samples in it; for high-freq speaker, ~45; hence the hardcoding
+		// in THIS case, the 150 is relative to Mark's cow.wav sample
+		let increment = 128;
+		// let increment = 256;
+		// let increment = audioBuffer.length / 4096; 
+			// in this increment is ~33; 
+		// Collaborator's Zero's suggestion
+		// let n = increment * 2 + 1;
+		let n = increment;
+
+		let semiresult = [];
+		let abbreviated = ['abbreviated:'];
+
+		while (n < audioBuffer.length) {
+			let testBuffer = audioBuffer.slice(n - increment, n);
+			pitch.input(testBuffer);
+			pitch.process();
+
+			var tone = pitch.findTone();
+			semiresult.push(tone);
+
+			if (tone !== abbreviated[abbreviated.length - 1]) {
+				abbreviated.push(tone)
+			}
+			n += increment;
+		}
+		// replace `abbreviated` with `semiresult` for working with *all* data points
+		let unique = abbreviated.map(elem => {
+			if (elem === null) {
+				return 0
+			} else {
+				return Math.floor(elem)
+			}
+		}).slice(1) // the `.slice(1)` because the abbreviated function is all messed up
+			.map((num, i, array) => {
+				if (num === 0 && i !== 0 && i !== array.length - 1) {
+					return num = (array[i-1] + array[i + 1]) / 2
+				} else {
+					return num
+				}
+			}); 
+
+		console.log(unique);
+		return unique;
+	})
+		.then(numSet => {
+			return numSet.map((num, i) => [i+1, num]);
+		})
+		.then(dataSet => {
+			let t = new timeseries.main(dataSet)
+			// let dataUrl = t.smoother({ period: 500}).noiseData().smoother({ period: 2 }).smoother({ period: 2 }).chart();
+			let pureData = t.chart();
+			console.log(pureData);
+		});
+};
+
+getData();
+
+
+
+/***/ }),
+/* 27 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
 exports.byteLength = byteLength
 exports.toByteArray = toByteArray
 exports.fromByteArray = fromByteArray
@@ -2529,7 +4182,7 @@ function fromByteArray (uint8) {
 
 
 /***/ }),
-/* 14 */
+/* 28 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2543,9 +4196,9 @@ function fromByteArray (uint8) {
 
 
 
-var base64 = __webpack_require__(13)
-var ieee754 = __webpack_require__(22)
-var isArray = __webpack_require__(25)
+var base64 = __webpack_require__(27)
+var ieee754 = __webpack_require__(29)
+var isArray = __webpack_require__(30)
 
 exports.Buffer = Buffer
 exports.SlowBuffer = SlowBuffer
@@ -4326,1025 +5979,7 @@ function isnan (val) {
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(8)))
 
 /***/ }),
-/* 15 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var createThunk = __webpack_require__(17)
-
-function Procedure() {
-  this.argTypes = []
-  this.shimArgs = []
-  this.arrayArgs = []
-  this.arrayBlockIndices = []
-  this.scalarArgs = []
-  this.offsetArgs = []
-  this.offsetArgIndex = []
-  this.indexArgs = []
-  this.shapeArgs = []
-  this.funcName = ""
-  this.pre = null
-  this.body = null
-  this.post = null
-  this.debug = false
-}
-
-function compileCwise(user_args) {
-  //Create procedure
-  var proc = new Procedure()
-  
-  //Parse blocks
-  proc.pre    = user_args.pre
-  proc.body   = user_args.body
-  proc.post   = user_args.post
-
-  //Parse arguments
-  var proc_args = user_args.args.slice(0)
-  proc.argTypes = proc_args
-  for(var i=0; i<proc_args.length; ++i) {
-    var arg_type = proc_args[i]
-    if(arg_type === "array" || (typeof arg_type === "object" && arg_type.blockIndices)) {
-      proc.argTypes[i] = "array"
-      proc.arrayArgs.push(i)
-      proc.arrayBlockIndices.push(arg_type.blockIndices ? arg_type.blockIndices : 0)
-      proc.shimArgs.push("array" + i)
-      if(i < proc.pre.args.length && proc.pre.args[i].count>0) {
-        throw new Error("cwise: pre() block may not reference array args")
-      }
-      if(i < proc.post.args.length && proc.post.args[i].count>0) {
-        throw new Error("cwise: post() block may not reference array args")
-      }
-    } else if(arg_type === "scalar") {
-      proc.scalarArgs.push(i)
-      proc.shimArgs.push("scalar" + i)
-    } else if(arg_type === "index") {
-      proc.indexArgs.push(i)
-      if(i < proc.pre.args.length && proc.pre.args[i].count > 0) {
-        throw new Error("cwise: pre() block may not reference array index")
-      }
-      if(i < proc.body.args.length && proc.body.args[i].lvalue) {
-        throw new Error("cwise: body() block may not write to array index")
-      }
-      if(i < proc.post.args.length && proc.post.args[i].count > 0) {
-        throw new Error("cwise: post() block may not reference array index")
-      }
-    } else if(arg_type === "shape") {
-      proc.shapeArgs.push(i)
-      if(i < proc.pre.args.length && proc.pre.args[i].lvalue) {
-        throw new Error("cwise: pre() block may not write to array shape")
-      }
-      if(i < proc.body.args.length && proc.body.args[i].lvalue) {
-        throw new Error("cwise: body() block may not write to array shape")
-      }
-      if(i < proc.post.args.length && proc.post.args[i].lvalue) {
-        throw new Error("cwise: post() block may not write to array shape")
-      }
-    } else if(typeof arg_type === "object" && arg_type.offset) {
-      proc.argTypes[i] = "offset"
-      proc.offsetArgs.push({ array: arg_type.array, offset:arg_type.offset })
-      proc.offsetArgIndex.push(i)
-    } else {
-      throw new Error("cwise: Unknown argument type " + proc_args[i])
-    }
-  }
-  
-  //Make sure at least one array argument was specified
-  if(proc.arrayArgs.length <= 0) {
-    throw new Error("cwise: No array arguments specified")
-  }
-  
-  //Make sure arguments are correct
-  if(proc.pre.args.length > proc_args.length) {
-    throw new Error("cwise: Too many arguments in pre() block")
-  }
-  if(proc.body.args.length > proc_args.length) {
-    throw new Error("cwise: Too many arguments in body() block")
-  }
-  if(proc.post.args.length > proc_args.length) {
-    throw new Error("cwise: Too many arguments in post() block")
-  }
-
-  //Check debug flag
-  proc.debug = !!user_args.printCode || !!user_args.debug
-  
-  //Retrieve name
-  proc.funcName = user_args.funcName || "cwise"
-  
-  //Read in block size
-  proc.blockSize = user_args.blockSize || 64
-
-  return createThunk(proc)
-}
-
-module.exports = compileCwise
-
-
-/***/ }),
-/* 16 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var uniq = __webpack_require__(29)
-
-// This function generates very simple loops analogous to how you typically traverse arrays (the outermost loop corresponds to the slowest changing index, the innermost loop to the fastest changing index)
-// TODO: If two arrays have the same strides (and offsets) there is potential for decreasing the number of "pointers" and related variables. The drawback is that the type signature would become more specific and that there would thus be less potential for caching, but it might still be worth it, especially when dealing with large numbers of arguments.
-function innerFill(order, proc, body) {
-  var dimension = order.length
-    , nargs = proc.arrayArgs.length
-    , has_index = proc.indexArgs.length>0
-    , code = []
-    , vars = []
-    , idx=0, pidx=0, i, j
-  for(i=0; i<dimension; ++i) { // Iteration variables
-    vars.push(["i",i,"=0"].join(""))
-  }
-  //Compute scan deltas
-  for(j=0; j<nargs; ++j) {
-    for(i=0; i<dimension; ++i) {
-      pidx = idx
-      idx = order[i]
-      if(i === 0) { // The innermost/fastest dimension's delta is simply its stride
-        vars.push(["d",j,"s",i,"=t",j,"p",idx].join(""))
-      } else { // For other dimensions the delta is basically the stride minus something which essentially "rewinds" the previous (more inner) dimension
-        vars.push(["d",j,"s",i,"=(t",j,"p",idx,"-s",pidx,"*t",j,"p",pidx,")"].join(""))
-      }
-    }
-  }
-  code.push("var " + vars.join(","))
-  //Scan loop
-  for(i=dimension-1; i>=0; --i) { // Start at largest stride and work your way inwards
-    idx = order[i]
-    code.push(["for(i",i,"=0;i",i,"<s",idx,";++i",i,"){"].join(""))
-  }
-  //Push body of inner loop
-  code.push(body)
-  //Advance scan pointers
-  for(i=0; i<dimension; ++i) {
-    pidx = idx
-    idx = order[i]
-    for(j=0; j<nargs; ++j) {
-      code.push(["p",j,"+=d",j,"s",i].join(""))
-    }
-    if(has_index) {
-      if(i > 0) {
-        code.push(["index[",pidx,"]-=s",pidx].join(""))
-      }
-      code.push(["++index[",idx,"]"].join(""))
-    }
-    code.push("}")
-  }
-  return code.join("\n")
-}
-
-// Generate "outer" loops that loop over blocks of data, applying "inner" loops to the blocks by manipulating the local variables in such a way that the inner loop only "sees" the current block.
-// TODO: If this is used, then the previous declaration (done by generateCwiseOp) of s* is essentially unnecessary.
-//       I believe the s* are not used elsewhere (in particular, I don't think they're used in the pre/post parts and "shape" is defined independently), so it would be possible to make defining the s* dependent on what loop method is being used.
-function outerFill(matched, order, proc, body) {
-  var dimension = order.length
-    , nargs = proc.arrayArgs.length
-    , blockSize = proc.blockSize
-    , has_index = proc.indexArgs.length > 0
-    , code = []
-  for(var i=0; i<nargs; ++i) {
-    code.push(["var offset",i,"=p",i].join(""))
-  }
-  //Generate loops for unmatched dimensions
-  // The order in which these dimensions are traversed is fairly arbitrary (from small stride to large stride, for the first argument)
-  // TODO: It would be nice if the order in which these loops are placed would also be somehow "optimal" (at the very least we should check that it really doesn't hurt us if they're not).
-  for(var i=matched; i<dimension; ++i) {
-    code.push(["for(var j"+i+"=SS[", order[i], "]|0;j", i, ">0;){"].join("")) // Iterate back to front
-    code.push(["if(j",i,"<",blockSize,"){"].join("")) // Either decrease j by blockSize (s = blockSize), or set it to zero (after setting s = j).
-    code.push(["s",order[i],"=j",i].join(""))
-    code.push(["j",i,"=0"].join(""))
-    code.push(["}else{s",order[i],"=",blockSize].join(""))
-    code.push(["j",i,"-=",blockSize,"}"].join(""))
-    if(has_index) {
-      code.push(["index[",order[i],"]=j",i].join(""))
-    }
-  }
-  for(var i=0; i<nargs; ++i) {
-    var indexStr = ["offset"+i]
-    for(var j=matched; j<dimension; ++j) {
-      indexStr.push(["j",j,"*t",i,"p",order[j]].join(""))
-    }
-    code.push(["p",i,"=(",indexStr.join("+"),")"].join(""))
-  }
-  code.push(innerFill(order, proc, body))
-  for(var i=matched; i<dimension; ++i) {
-    code.push("}")
-  }
-  return code.join("\n")
-}
-
-//Count the number of compatible inner orders
-// This is the length of the longest common prefix of the arrays in orders.
-// Each array in orders lists the dimensions of the correspond ndarray in order of increasing stride.
-// This is thus the maximum number of dimensions that can be efficiently traversed by simple nested loops for all arrays.
-function countMatches(orders) {
-  var matched = 0, dimension = orders[0].length
-  while(matched < dimension) {
-    for(var j=1; j<orders.length; ++j) {
-      if(orders[j][matched] !== orders[0][matched]) {
-        return matched
-      }
-    }
-    ++matched
-  }
-  return matched
-}
-
-//Processes a block according to the given data types
-// Replaces variable names by different ones, either "local" ones (that are then ferried in and out of the given array) or ones matching the arguments that the function performing the ultimate loop will accept.
-function processBlock(block, proc, dtypes) {
-  var code = block.body
-  var pre = []
-  var post = []
-  for(var i=0; i<block.args.length; ++i) {
-    var carg = block.args[i]
-    if(carg.count <= 0) {
-      continue
-    }
-    var re = new RegExp(carg.name, "g")
-    var ptrStr = ""
-    var arrNum = proc.arrayArgs.indexOf(i)
-    switch(proc.argTypes[i]) {
-      case "offset":
-        var offArgIndex = proc.offsetArgIndex.indexOf(i)
-        var offArg = proc.offsetArgs[offArgIndex]
-        arrNum = offArg.array
-        ptrStr = "+q" + offArgIndex // Adds offset to the "pointer" in the array
-      case "array":
-        ptrStr = "p" + arrNum + ptrStr
-        var localStr = "l" + i
-        var arrStr = "a" + arrNum
-        if (proc.arrayBlockIndices[arrNum] === 0) { // Argument to body is just a single value from this array
-          if(carg.count === 1) { // Argument/array used only once(?)
-            if(dtypes[arrNum] === "generic") {
-              if(carg.lvalue) {
-                pre.push(["var ", localStr, "=", arrStr, ".get(", ptrStr, ")"].join("")) // Is this necessary if the argument is ONLY used as an lvalue? (keep in mind that we can have a += something, so we would actually need to check carg.rvalue)
-                code = code.replace(re, localStr)
-                post.push([arrStr, ".set(", ptrStr, ",", localStr,")"].join(""))
-              } else {
-                code = code.replace(re, [arrStr, ".get(", ptrStr, ")"].join(""))
-              }
-            } else {
-              code = code.replace(re, [arrStr, "[", ptrStr, "]"].join(""))
-            }
-          } else if(dtypes[arrNum] === "generic") {
-            pre.push(["var ", localStr, "=", arrStr, ".get(", ptrStr, ")"].join("")) // TODO: Could we optimize by checking for carg.rvalue?
-            code = code.replace(re, localStr)
-            if(carg.lvalue) {
-              post.push([arrStr, ".set(", ptrStr, ",", localStr,")"].join(""))
-            }
-          } else {
-            pre.push(["var ", localStr, "=", arrStr, "[", ptrStr, "]"].join("")) // TODO: Could we optimize by checking for carg.rvalue?
-            code = code.replace(re, localStr)
-            if(carg.lvalue) {
-              post.push([arrStr, "[", ptrStr, "]=", localStr].join(""))
-            }
-          }
-        } else { // Argument to body is a "block"
-          var reStrArr = [carg.name], ptrStrArr = [ptrStr]
-          for(var j=0; j<Math.abs(proc.arrayBlockIndices[arrNum]); j++) {
-            reStrArr.push("\\s*\\[([^\\]]+)\\]")
-            ptrStrArr.push("$" + (j+1) + "*t" + arrNum + "b" + j) // Matched index times stride
-          }
-          re = new RegExp(reStrArr.join(""), "g")
-          ptrStr = ptrStrArr.join("+")
-          if(dtypes[arrNum] === "generic") {
-            /*if(carg.lvalue) {
-              pre.push(["var ", localStr, "=", arrStr, ".get(", ptrStr, ")"].join("")) // Is this necessary if the argument is ONLY used as an lvalue? (keep in mind that we can have a += something, so we would actually need to check carg.rvalue)
-              code = code.replace(re, localStr)
-              post.push([arrStr, ".set(", ptrStr, ",", localStr,")"].join(""))
-            } else {
-              code = code.replace(re, [arrStr, ".get(", ptrStr, ")"].join(""))
-            }*/
-            throw new Error("cwise: Generic arrays not supported in combination with blocks!")
-          } else {
-            // This does not produce any local variables, even if variables are used multiple times. It would be possible to do so, but it would complicate things quite a bit.
-            code = code.replace(re, [arrStr, "[", ptrStr, "]"].join(""))
-          }
-        }
-      break
-      case "scalar":
-        code = code.replace(re, "Y" + proc.scalarArgs.indexOf(i))
-      break
-      case "index":
-        code = code.replace(re, "index")
-      break
-      case "shape":
-        code = code.replace(re, "shape")
-      break
-    }
-  }
-  return [pre.join("\n"), code, post.join("\n")].join("\n").trim()
-}
-
-function typeSummary(dtypes) {
-  var summary = new Array(dtypes.length)
-  var allEqual = true
-  for(var i=0; i<dtypes.length; ++i) {
-    var t = dtypes[i]
-    var digits = t.match(/\d+/)
-    if(!digits) {
-      digits = ""
-    } else {
-      digits = digits[0]
-    }
-    if(t.charAt(0) === 0) {
-      summary[i] = "u" + t.charAt(1) + digits
-    } else {
-      summary[i] = t.charAt(0) + digits
-    }
-    if(i > 0) {
-      allEqual = allEqual && summary[i] === summary[i-1]
-    }
-  }
-  if(allEqual) {
-    return summary[0]
-  }
-  return summary.join("")
-}
-
-//Generates a cwise operator
-function generateCWiseOp(proc, typesig) {
-
-  //Compute dimension
-  // Arrays get put first in typesig, and there are two entries per array (dtype and order), so this gets the number of dimensions in the first array arg.
-  var dimension = (typesig[1].length - Math.abs(proc.arrayBlockIndices[0]))|0
-  var orders = new Array(proc.arrayArgs.length)
-  var dtypes = new Array(proc.arrayArgs.length)
-  for(var i=0; i<proc.arrayArgs.length; ++i) {
-    dtypes[i] = typesig[2*i]
-    orders[i] = typesig[2*i+1]
-  }
-  
-  //Determine where block and loop indices start and end
-  var blockBegin = [], blockEnd = [] // These indices are exposed as blocks
-  var loopBegin = [], loopEnd = [] // These indices are iterated over
-  var loopOrders = [] // orders restricted to the loop indices
-  for(var i=0; i<proc.arrayArgs.length; ++i) {
-    if (proc.arrayBlockIndices[i]<0) {
-      loopBegin.push(0)
-      loopEnd.push(dimension)
-      blockBegin.push(dimension)
-      blockEnd.push(dimension+proc.arrayBlockIndices[i])
-    } else {
-      loopBegin.push(proc.arrayBlockIndices[i]) // Non-negative
-      loopEnd.push(proc.arrayBlockIndices[i]+dimension)
-      blockBegin.push(0)
-      blockEnd.push(proc.arrayBlockIndices[i])
-    }
-    var newOrder = []
-    for(var j=0; j<orders[i].length; j++) {
-      if (loopBegin[i]<=orders[i][j] && orders[i][j]<loopEnd[i]) {
-        newOrder.push(orders[i][j]-loopBegin[i]) // If this is a loop index, put it in newOrder, subtracting loopBegin, to make sure that all loopOrders are using a common set of indices.
-      }
-    }
-    loopOrders.push(newOrder)
-  }
-
-  //First create arguments for procedure
-  var arglist = ["SS"] // SS is the overall shape over which we iterate
-  var code = ["'use strict'"]
-  var vars = []
-  
-  for(var j=0; j<dimension; ++j) {
-    vars.push(["s", j, "=SS[", j, "]"].join("")) // The limits for each dimension.
-  }
-  for(var i=0; i<proc.arrayArgs.length; ++i) {
-    arglist.push("a"+i) // Actual data array
-    arglist.push("t"+i) // Strides
-    arglist.push("p"+i) // Offset in the array at which the data starts (also used for iterating over the data)
-    
-    for(var j=0; j<dimension; ++j) { // Unpack the strides into vars for looping
-      vars.push(["t",i,"p",j,"=t",i,"[",loopBegin[i]+j,"]"].join(""))
-    }
-    
-    for(var j=0; j<Math.abs(proc.arrayBlockIndices[i]); ++j) { // Unpack the strides into vars for block iteration
-      vars.push(["t",i,"b",j,"=t",i,"[",blockBegin[i]+j,"]"].join(""))
-    }
-  }
-  for(var i=0; i<proc.scalarArgs.length; ++i) {
-    arglist.push("Y" + i)
-  }
-  if(proc.shapeArgs.length > 0) {
-    vars.push("shape=SS.slice(0)") // Makes the shape over which we iterate available to the user defined functions (so you can use width/height for example)
-  }
-  if(proc.indexArgs.length > 0) {
-    // Prepare an array to keep track of the (logical) indices, initialized to dimension zeroes.
-    var zeros = new Array(dimension)
-    for(var i=0; i<dimension; ++i) {
-      zeros[i] = "0"
-    }
-    vars.push(["index=[", zeros.join(","), "]"].join(""))
-  }
-  for(var i=0; i<proc.offsetArgs.length; ++i) { // Offset arguments used for stencil operations
-    var off_arg = proc.offsetArgs[i]
-    var init_string = []
-    for(var j=0; j<off_arg.offset.length; ++j) {
-      if(off_arg.offset[j] === 0) {
-        continue
-      } else if(off_arg.offset[j] === 1) {
-        init_string.push(["t", off_arg.array, "p", j].join(""))      
-      } else {
-        init_string.push([off_arg.offset[j], "*t", off_arg.array, "p", j].join(""))
-      }
-    }
-    if(init_string.length === 0) {
-      vars.push("q" + i + "=0")
-    } else {
-      vars.push(["q", i, "=", init_string.join("+")].join(""))
-    }
-  }
-
-  //Prepare this variables
-  var thisVars = uniq([].concat(proc.pre.thisVars)
-                      .concat(proc.body.thisVars)
-                      .concat(proc.post.thisVars))
-  vars = vars.concat(thisVars)
-  code.push("var " + vars.join(","))
-  for(var i=0; i<proc.arrayArgs.length; ++i) {
-    code.push("p"+i+"|=0")
-  }
-  
-  //Inline prelude
-  if(proc.pre.body.length > 3) {
-    code.push(processBlock(proc.pre, proc, dtypes))
-  }
-
-  //Process body
-  var body = processBlock(proc.body, proc, dtypes)
-  var matched = countMatches(loopOrders)
-  if(matched < dimension) {
-    code.push(outerFill(matched, loopOrders[0], proc, body)) // TODO: Rather than passing loopOrders[0], it might be interesting to look at passing an order that represents the majority of the arguments for example.
-  } else {
-    code.push(innerFill(loopOrders[0], proc, body))
-  }
-
-  //Inline epilog
-  if(proc.post.body.length > 3) {
-    code.push(processBlock(proc.post, proc, dtypes))
-  }
-  
-  if(proc.debug) {
-    console.log("-----Generated cwise routine for ", typesig, ":\n" + code.join("\n") + "\n----------")
-  }
-  
-  var loopName = [(proc.funcName||"unnamed"), "_cwise_loop_", orders[0].join("s"),"m",matched,typeSummary(dtypes)].join("")
-  var f = new Function(["function ",loopName,"(", arglist.join(","),"){", code.join("\n"),"} return ", loopName].join(""))
-  return f()
-}
-module.exports = generateCWiseOp
-
-
-/***/ }),
-/* 17 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-// The function below is called when constructing a cwise function object, and does the following:
-// A function object is constructed which accepts as argument a compilation function and returns another function.
-// It is this other function that is eventually returned by createThunk, and this function is the one that actually
-// checks whether a certain pattern of arguments has already been used before and compiles new loops as needed.
-// The compilation passed to the first function object is used for compiling new functions.
-// Once this function object is created, it is called with compile as argument, where the first argument of compile
-// is bound to "proc" (essentially containing a preprocessed version of the user arguments to cwise).
-// So createThunk roughly works like this:
-// function createThunk(proc) {
-//   var thunk = function(compileBound) {
-//     var CACHED = {}
-//     return function(arrays and scalars) {
-//       if (dtype and order of arrays in CACHED) {
-//         var func = CACHED[dtype and order of arrays]
-//       } else {
-//         var func = CACHED[dtype and order of arrays] = compileBound(dtype and order of arrays)
-//       }
-//       return func(arrays and scalars)
-//     }
-//   }
-//   return thunk(compile.bind1(proc))
-// }
-
-var compile = __webpack_require__(16)
-
-function createThunk(proc) {
-  var code = ["'use strict'", "var CACHED={}"]
-  var vars = []
-  var thunkName = proc.funcName + "_cwise_thunk"
-  
-  //Build thunk
-  code.push(["return function ", thunkName, "(", proc.shimArgs.join(","), "){"].join(""))
-  var typesig = []
-  var string_typesig = []
-  var proc_args = [["array",proc.arrayArgs[0],".shape.slice(", // Slice shape so that we only retain the shape over which we iterate (which gets passed to the cwise operator as SS).
-                    Math.max(0,proc.arrayBlockIndices[0]),proc.arrayBlockIndices[0]<0?(","+proc.arrayBlockIndices[0]+")"):")"].join("")]
-  var shapeLengthConditions = [], shapeConditions = []
-  // Process array arguments
-  for(var i=0; i<proc.arrayArgs.length; ++i) {
-    var j = proc.arrayArgs[i]
-    vars.push(["t", j, "=array", j, ".dtype,",
-               "r", j, "=array", j, ".order"].join(""))
-    typesig.push("t" + j)
-    typesig.push("r" + j)
-    string_typesig.push("t"+j)
-    string_typesig.push("r"+j+".join()")
-    proc_args.push("array" + j + ".data")
-    proc_args.push("array" + j + ".stride")
-    proc_args.push("array" + j + ".offset|0")
-    if (i>0) { // Gather conditions to check for shape equality (ignoring block indices)
-      shapeLengthConditions.push("array" + proc.arrayArgs[0] + ".shape.length===array" + j + ".shape.length+" + (Math.abs(proc.arrayBlockIndices[0])-Math.abs(proc.arrayBlockIndices[i])))
-      shapeConditions.push("array" + proc.arrayArgs[0] + ".shape[shapeIndex+" + Math.max(0,proc.arrayBlockIndices[0]) + "]===array" + j + ".shape[shapeIndex+" + Math.max(0,proc.arrayBlockIndices[i]) + "]")
-    }
-  }
-  // Check for shape equality
-  if (proc.arrayArgs.length > 1) {
-    code.push("if (!(" + shapeLengthConditions.join(" && ") + ")) throw new Error('cwise: Arrays do not all have the same dimensionality!')")
-    code.push("for(var shapeIndex=array" + proc.arrayArgs[0] + ".shape.length-" + Math.abs(proc.arrayBlockIndices[0]) + "; shapeIndex-->0;) {")
-    code.push("if (!(" + shapeConditions.join(" && ") + ")) throw new Error('cwise: Arrays do not all have the same shape!')")
-    code.push("}")
-  }
-  // Process scalar arguments
-  for(var i=0; i<proc.scalarArgs.length; ++i) {
-    proc_args.push("scalar" + proc.scalarArgs[i])
-  }
-  // Check for cached function (and if not present, generate it)
-  vars.push(["type=[", string_typesig.join(","), "].join()"].join(""))
-  vars.push("proc=CACHED[type]")
-  code.push("var " + vars.join(","))
-  
-  code.push(["if(!proc){",
-             "CACHED[type]=proc=compile([", typesig.join(","), "])}",
-             "return proc(", proc_args.join(","), ")}"].join(""))
-
-  if(proc.debug) {
-    console.log("-----Generated thunk:\n" + code.join("\n") + "\n----------")
-  }
-  
-  //Compile thunk
-  var thunk = new Function("compile", code.join("\n"))
-  return thunk(compile.bind(undefined, proc))
-}
-
-module.exports = createThunk
-
-
-/***/ }),
-/* 18 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-function dupe_array(count, value, i) {
-  var c = count[i]|0
-  if(c <= 0) {
-    return []
-  }
-  var result = new Array(c), j
-  if(i === count.length-1) {
-    for(j=0; j<c; ++j) {
-      result[j] = value
-    }
-  } else {
-    for(j=0; j<c; ++j) {
-      result[j] = dupe_array(count, value, i+1)
-    }
-  }
-  return result
-}
-
-function dupe_number(count, value) {
-  var result, i
-  result = new Array(count)
-  for(i=0; i<count; ++i) {
-    result[i] = value
-  }
-  return result
-}
-
-function dupe(count, value) {
-  if(typeof value === "undefined") {
-    value = 0
-  }
-  switch(typeof count) {
-    case "number":
-      if(count > 0) {
-        return dupe_number(count|0, value)
-      }
-    break
-    case "object":
-      if(typeof (count.length) === "number") {
-        return dupe_array(count, value, 0)
-      }
-    break
-  }
-  return []
-}
-
-module.exports = dupe
-
-/***/ }),
-/* 19 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/*===========================================================================*\
- * Discrete Fourier Transform (O(n^2) brute-force method)
- *
- * (c) Vail Systems. Joshua Jung and Ben Bryan. 2015
- *
- * This code is not designed to be highly optimized but as an educational
- * tool to understand the Fast Fourier Transform.
-\*===========================================================================*/
-
-//------------------------------------------------
-// Note: this code is not optimized and is
-// primarily designed as an educational and testing
-// tool.
-//------------------------------------------------
-var complex = __webpack_require__(1);
-var fftUtil = __webpack_require__(3);
-
-//-------------------------------------------------
-// Calculate brute-force O(n^2) DFT for vector.
-//-------------------------------------------------
-var dft = function(vector) {
-  var X = [],
-      N = vector.length;
-
-  for (var k = 0; k < N; k++) {
-    X[k] = [0, 0]; //Initialize to a 0-valued complex number.
-
-    for (var i = 0; i < N; i++) {
-      var exp = fftUtil.exponent(k * i, N);
-      var term = complex.multiply([vector[i], 0], exp); //Complex mult of the signal with the exponential term.
-      X[k] = complex.add(X[k], term); //Complex summation of X[k] and exponential
-    }
-  }
-
-  return X;
-};
-
-module.exports = dft;
-
-/***/ }),
-/* 20 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/*===========================================================================*\
- * Inverse Fast Fourier Transform (Cooley-Tukey Method)
- *
- * (c) Maximilian Bügler. 2016
- *
- * Based on and using the code by
- * (c) Vail Systems. Joshua Jung and Ben Bryan. 2015
- *
- * This code is not designed to be highly optimized but as an educational
- * tool to understand the Fast Fourier Transform.
-\*===========================================================================*/
-
-//------------------------------------------------
-// Note: Some of this code is not optimized and is
-// primarily designed as an educational and testing
-// tool.
-// To get high performace would require transforming
-// the recursive calls into a loop and then loop
-// unrolling. All of this is best accomplished
-// in C or assembly.
-//-------------------------------------------------
-
-//-------------------------------------------------
-// The following code assumes a complex number is
-// an array: [real, imaginary]
-//-------------------------------------------------
-
-var fft = __webpack_require__(2).fft;
-
-
-module.exports = {
-    ifft: function ifft(signal){
-        //Interchange real and imaginary parts
-        var csignal=[];
-        for(var i=0; i<signal.length; i++){
-            csignal[i]=[signal[i][1], signal[i][0]];
-        }
-    
-        //Apply fft
-        var ps=fft(csignal);
-        
-        //Interchange real and imaginary parts and normalize
-        var res=[];
-        for(var j=0; j<ps.length; j++){
-            res[j]=[ps[j][1]/ps.length, ps[j][0]/ps.length];
-        }
-        return res;
-    }
-};
-
-
-/***/ }),
-/* 21 */
-/***/ (function(module, exports) {
-
-/* Copyright (c) 2012, Jens Nockert <jens@ofmlabs.org>, Jussi Kalliokoski <jussi@ofmlabs.org>
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met: 
- * 
- * 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. 
- * 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution. 
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-if (!FFT) {
-	var FFT = {}
-}
-
-void function (namespace) {
-	"use strict"
-	
-	function butterfly2(output, outputOffset, outputStride, fStride, state, m) {
-		var t = state.twiddle
-		
-		for (var i = 0; i < m; i++) {
-			var s0_r = output[2 * ((outputOffset) + (outputStride) * (i))], s0_i = output[2 * ((outputOffset) + (outputStride) * (i)) + 1]
-			var s1_r = output[2 * ((outputOffset) + (outputStride) * (i + m))], s1_i = output[2 * ((outputOffset) + (outputStride) * (i + m)) + 1]
-			
-			var t1_r = t[2 * ((0) + (fStride) * (i))], t1_i = t[2 * ((0) + (fStride) * (i)) + 1]
-			
-			var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
-			
-			var r0_r = s0_r + v1_r, r0_i = s0_i + v1_i
-			var r1_r = s0_r - v1_r, r1_i = s0_i - v1_i
-			
-			output[2 * ((outputOffset) + (outputStride) * (i))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = r0_i
-			output[2 * ((outputOffset) + (outputStride) * (i + m))] = r1_r, output[2 * ((outputOffset) + (outputStride) * (i + m)) + 1] = r1_i
-		}
-	}
-	
-	function butterfly3(output, outputOffset, outputStride, fStride, state, m) {
-		var t = state.twiddle
-		var m1 = m, m2 = 2 * m
-		var fStride1 = fStride, fStride2 = 2 * fStride
-		
-		var e = t[2 * ((0) + (fStride) * (m)) + 1]
-		
-		for (var i = 0; i < m; i++) {
-			var s0_r = output[2 * ((outputOffset) + (outputStride) * (i))], s0_i = output[2 * ((outputOffset) + (outputStride) * (i)) + 1]
-			
-			var s1_r = output[2 * ((outputOffset) + (outputStride) * (i + m1))], s1_i = output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1]
-			var t1_r = t[2 * ((0) + (fStride1) * (i))], t1_i = t[2 * ((0) + (fStride1) * (i)) + 1]
-			var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
-			
-			var s2_r = output[2 * ((outputOffset) + (outputStride) * (i + m2))], s2_i = output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1]
-			var t2_r = t[2 * ((0) + (fStride2) * (i))], t2_i = t[2 * ((0) + (fStride2) * (i)) + 1]
-			var v2_r = s2_r * t2_r - s2_i * t2_i, v2_i = s2_r * t2_i + s2_i * t2_r
-			
-			var i0_r = v1_r + v2_r, i0_i = v1_i + v2_i
-			
-			var r0_r = s0_r + i0_r, r0_i = s0_i + i0_i
-			output[2 * ((outputOffset) + (outputStride) * (i))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = r0_i
-			
-			var i1_r = s0_r - i0_r * 0.5
-			var i1_i = s0_i - i0_i * 0.5
-			
-			var i2_r = (v1_r - v2_r) * e
-			var i2_i = (v1_i - v2_i) * e
-			
-			var r1_r = i1_r - i2_i
-			var r1_i = i1_i + i2_r
-			output[2 * ((outputOffset) + (outputStride) * (i + m1))] = r1_r, output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1] = r1_i
-			
-			var r2_r = i1_r + i2_i
-			var r2_i = i1_i - i2_r
-			output[2 * ((outputOffset) + (outputStride) * (i + m2))] = r2_r, output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1] = r2_i
-		}
-	}
-	
-	function butterfly4(output, outputOffset, outputStride, fStride, state, m) {
-		var t = state.twiddle
-		var m1 = m, m2 = 2 * m, m3 = 3 * m
-		var fStride1 = fStride, fStride2 = 2 * fStride, fStride3 = 3 * fStride
-		
-		for (var i = 0; i < m; i++) {
-			var s0_r = output[2 * ((outputOffset) + (outputStride) * (i))], s0_i = output[2 * ((outputOffset) + (outputStride) * (i)) + 1]
-			
-			var s1_r = output[2 * ((outputOffset) + (outputStride) * (i + m1))], s1_i = output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1]
-			var t1_r = t[2 * ((0) + (fStride1) * (i))], t1_i = t[2 * ((0) + (fStride1) * (i)) + 1]
-			var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
-			
-			var s2_r = output[2 * ((outputOffset) + (outputStride) * (i + m2))], s2_i = output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1]
-			var t2_r = t[2 * ((0) + (fStride2) * (i))], t2_i = t[2 * ((0) + (fStride2) * (i)) + 1]
-			var v2_r = s2_r * t2_r - s2_i * t2_i, v2_i = s2_r * t2_i + s2_i * t2_r
-			
-			var s3_r = output[2 * ((outputOffset) + (outputStride) * (i + m3))], s3_i = output[2 * ((outputOffset) + (outputStride) * (i + m3)) + 1]
-			var t3_r = t[2 * ((0) + (fStride3) * (i))], t3_i = t[2 * ((0) + (fStride3) * (i)) + 1]
-			var v3_r = s3_r * t3_r - s3_i * t3_i, v3_i = s3_r * t3_i + s3_i * t3_r
-			
-			var i0_r = s0_r + v2_r, i0_i = s0_i + v2_i
-			var i1_r = s0_r - v2_r, i1_i = s0_i - v2_i
-			var i2_r = v1_r + v3_r, i2_i = v1_i + v3_i
-			var i3_r = v1_r - v3_r, i3_i = v1_i - v3_i
-			
-			var r0_r = i0_r + i2_r, r0_i = i0_i + i2_i
-			
-			if (state.inverse) {
-				var r1_r = i1_r - i3_i
-				var r1_i = i1_i + i3_r
-			} else {
-				var r1_r = i1_r + i3_i
-				var r1_i = i1_i - i3_r
-			}
-			
-			var r2_r = i0_r - i2_r, r2_i = i0_i - i2_i
-			
-			if (state.inverse) {
-				var r3_r = i1_r + i3_i
-				var r3_i = i1_i - i3_r
-			} else {
-				var r3_r = i1_r - i3_i
-				var r3_i = i1_i + i3_r
-			}
-			
-			output[2 * ((outputOffset) + (outputStride) * (i))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = r0_i
-			output[2 * ((outputOffset) + (outputStride) * (i + m1))] = r1_r, output[2 * ((outputOffset) + (outputStride) * (i + m1)) + 1] = r1_i
-			output[2 * ((outputOffset) + (outputStride) * (i + m2))] = r2_r, output[2 * ((outputOffset) + (outputStride) * (i + m2)) + 1] = r2_i
-			output[2 * ((outputOffset) + (outputStride) * (i + m3))] = r3_r, output[2 * ((outputOffset) + (outputStride) * (i + m3)) + 1] = r3_i
-		}
-	}
-	
-	function butterfly(output, outputOffset, outputStride, fStride, state, m, p) {
-		var t = state.twiddle, n = state.n, scratch = new Float64Array(2 * p)
-		
-		for (var u = 0; u < m; u++) {
-			for (var q1 = 0, k = u; q1 < p; q1++, k += m) {
-				var x0_r = output[2 * ((outputOffset) + (outputStride) * (k))], x0_i = output[2 * ((outputOffset) + (outputStride) * (k)) + 1]
-				scratch[2 * (q1)] = x0_r, scratch[2 * (q1) + 1] = x0_i
-			}
-			
-			for (var q1 = 0, k = u; q1 < p; q1++, k += m) {
-				var tOffset = 0
-				
-				var x0_r = scratch[2 * (0)], x0_i = scratch[2 * (0) + 1]
-				output[2 * ((outputOffset) + (outputStride) * (k))] = x0_r, output[2 * ((outputOffset) + (outputStride) * (k)) + 1] = x0_i
-				
-				for (var q = 1; q < p; q++) {
-					tOffset = (tOffset + fStride * k) % n
-					
-					var s0_r = output[2 * ((outputOffset) + (outputStride) * (k))], s0_i = output[2 * ((outputOffset) + (outputStride) * (k)) + 1]
-					
-					var s1_r = scratch[2 * (q)], s1_i = scratch[2 * (q) + 1]
-					var t1_r = t[2 * (tOffset)], t1_i = t[2 * (tOffset) + 1]
-					var v1_r = s1_r * t1_r - s1_i * t1_i, v1_i = s1_r * t1_i + s1_i * t1_r
-					
-					var r0_r = s0_r + v1_r, r0_i = s0_i + v1_i
-					output[2 * ((outputOffset) + (outputStride) * (k))] = r0_r, output[2 * ((outputOffset) + (outputStride) * (k)) + 1] = r0_i
-				}
-			}
-		}
-	}
-	
-	function work(output, outputOffset, outputStride, f, fOffset, fStride, inputStride, factors, state) {
-		var p = factors.shift()
-		var m = factors.shift()
-		
-		if (m == 1) {
-			for (var i = 0; i < p * m; i++) {
-				var x0_r = f[2 * ((fOffset) + (fStride * inputStride) * (i))], x0_i = f[2 * ((fOffset) + (fStride * inputStride) * (i)) + 1]
-				output[2 * ((outputOffset) + (outputStride) * (i))] = x0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = x0_i
-			}
-		} else {
-			for (var i = 0; i < p; i++) {
-				work(output, outputOffset + outputStride * i * m, outputStride, f, fOffset + i * fStride * inputStride, fStride * p, inputStride, factors.slice(), state)
-			}
-		}
-		
-		switch (p) {
-			case 2: butterfly2(output, outputOffset, outputStride, fStride, state, m); break
-			case 3: butterfly3(output, outputOffset, outputStride, fStride, state, m); break
-			case 4: butterfly4(output, outputOffset, outputStride, fStride, state, m); break
-			default: butterfly(output, outputOffset, outputStride, fStride, state, m, p); break
-		}
-	}
-	
-	var complex = function (n, inverse) {
-		var n = ~~n, inverse = !!inverse
-		
-		if (n < 1) {
-			throw new RangeError("n is outside range, should be positive integer, was `" + n + "'")
-		}
-		
-		var state = {
-			n: n,
-			inverse: inverse,
-			
-			factors: [],
-			twiddle: new Float64Array(2 * n),
-			scratch: new Float64Array(2 * n)
-		}
-		
-		var t = state.twiddle, theta = 2 * Math.PI / n
-		
-		for (var i = 0; i < n; i++) {
-			if (inverse) {
-				var phase =  theta * i
-			} else {
-				var phase = -theta * i
-			}
-			
-			t[2 * (i)] = Math.cos(phase)
-			t[2 * (i) + 1] = Math.sin(phase)
-		}
-		
-		var p = 4, v = Math.floor(Math.sqrt(n))
-		
-		while (n > 1) {
-			while (n % p) {
-				switch (p) {
-					case 4: p = 2; break
-					case 2: p = 3; break
-					default: p += 2; break
-				}
-				
-				if (p > v) {
-					p = n
-				}
-			}
-			
-			n /= p
-			
-			state.factors.push(p)
-			state.factors.push(n)
-		}
-		
-		this.state = state
-	}
-	
-	complex.prototype.simple = function (output, input, t) {
-		this.process(output, 0, 1, input, 0, 1, t)
-	}
-	
-	complex.prototype.process = function(output, outputOffset, outputStride, input, inputOffset, inputStride, t) {
-		var outputStride = ~~outputStride, inputStride = ~~inputStride
-		
-		var type = t == 'real' ? t : 'complex'
-		
-		if (outputStride < 1) {
-			throw new RangeError("outputStride is outside range, should be positive integer, was `" + outputStride + "'")
-		}
-		
-		if (inputStride < 1) {
-			throw new RangeError("inputStride is outside range, should be positive integer, was `" + inputStride + "'")
-		}
-		
-		if (type == 'real') {
-			for (var i = 0; i < this.state.n; i++) {
-				var x0_r = input[inputOffset + inputStride * i]
-				var x0_i = 0.0
-				
-				this.state.scratch[2 * (i)] = x0_r, this.state.scratch[2 * (i) + 1] = x0_i
-			}
-			
-			work(output, outputOffset, outputStride, this.state.scratch, 0, 1, 1, this.state.factors.slice(), this.state)
-		} else {
-			if (input == output) {
-				work(this.state.scratch, 0, 1, input, inputOffset, 1, inputStride, this.state.factors.slice(), this.state)
-				
-				for (var i = 0; i < this.state.n; i++) {
-					var x0_r = this.state.scratch[2 * (i)], x0_i = this.state.scratch[2 * (i) + 1]
-					
-					output[2 * ((outputOffset) + (outputStride) * (i))] = x0_r, output[2 * ((outputOffset) + (outputStride) * (i)) + 1] = x0_i
-				}
-			} else {
-				work(output, outputOffset, outputStride, input, inputOffset, 1, inputStride, this.state.factors.slice(), this.state)
-			}
-		}
-	}
-	
-	namespace.complex = complex
-}(FFT)
-
-module.exports = FFT
-
-/***/ }),
-/* 22 */
+/* 29 */
 /***/ (function(module, exports) {
 
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
@@ -5434,51 +6069,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
 
 /***/ }),
-/* 23 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-function iota(n) {
-  var result = new Array(n)
-  for(var i=0; i<n; ++i) {
-    result[i] = i
-  }
-  return result
-}
-
-module.exports = iota
-
-/***/ }),
-/* 24 */
-/***/ (function(module, exports) {
-
-/*!
- * Determine if an object is a Buffer
- *
- * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
- * @license  MIT
- */
-
-// The _isBuffer check is for Safari 5-7 support, because it's missing
-// Object.prototype.constructor. Remove this eventually
-module.exports = function (obj) {
-  return obj != null && (isBuffer(obj) || isSlowBuffer(obj) || !!obj._isBuffer)
-}
-
-function isBuffer (obj) {
-  return !!obj.constructor && typeof obj.constructor.isBuffer === 'function' && obj.constructor.isBuffer(obj)
-}
-
-// For Node v0.10 support. Remove this eventually.
-function isSlowBuffer (obj) {
-  return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isBuffer(obj.slice(0, 0))
-}
-
-
-/***/ }),
-/* 25 */
+/* 30 */
 /***/ (function(module, exports) {
 
 var toString = {}.toString;
@@ -5489,552 +6080,3547 @@ module.exports = Array.isArray || function (arr) {
 
 
 /***/ }),
-/* 26 */
+/* 31 */
 /***/ (function(module, exports, __webpack_require__) {
 
-"use strict";
+var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;//     Underscore.js 1.8.3
+//     http://underscorejs.org
+//     (c) 2009-2015 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
+//     Underscore may be freely distributed under the MIT license.
 
+(function() {
 
-var ops = __webpack_require__(5)
-var ndarray = __webpack_require__(6)
-var pool = __webpack_require__(7)
-var fftm = __webpack_require__(27)
+  // Baseline setup
+  // --------------
 
-function ndfft(dir, x, y) {
-  var shape = x.shape
-    , d = shape.length
-    , size = 1
-    , stride = new Array(d)
-    , pad = 0
-    , i, j
-  for(i=d-1; i>=0; --i) {
-    stride[i] = size
-    size *= shape[i]
-    pad = Math.max(pad, fftm.scratchMemory(shape[i]))
-    if(x.shape[i] !== y.shape[i]) {
-      throw new Error('Shape mismatch, real and imaginary arrays must have same size')
+  // Establish the root object, `window` in the browser, or `exports` on the server.
+  var root = this;
+
+  // Save the previous value of the `_` variable.
+  var previousUnderscore = root._;
+
+  // Save bytes in the minified (but not gzipped) version:
+  var ArrayProto = Array.prototype, ObjProto = Object.prototype, FuncProto = Function.prototype;
+
+  // Create quick reference variables for speed access to core prototypes.
+  var
+    push             = ArrayProto.push,
+    slice            = ArrayProto.slice,
+    toString         = ObjProto.toString,
+    hasOwnProperty   = ObjProto.hasOwnProperty;
+
+  // All **ECMAScript 5** native function implementations that we hope to use
+  // are declared here.
+  var
+    nativeIsArray      = Array.isArray,
+    nativeKeys         = Object.keys,
+    nativeBind         = FuncProto.bind,
+    nativeCreate       = Object.create;
+
+  // Naked function reference for surrogate-prototype-swapping.
+  var Ctor = function(){};
+
+  // Create a safe reference to the Underscore object for use below.
+  var _ = function(obj) {
+    if (obj instanceof _) return obj;
+    if (!(this instanceof _)) return new _(obj);
+    this._wrapped = obj;
+  };
+
+  // Export the Underscore object for **Node.js**, with
+  // backwards-compatibility for the old `require()` API. If we're in
+  // the browser, add `_` as a global object.
+  if (true) {
+    if (typeof module !== 'undefined' && module.exports) {
+      exports = module.exports = _;
     }
-  }
-  var buf_size = 4 * size + pad
-  var buffer
-  if( x.dtype === 'array' ||
-      x.dtype === 'float64' ||
-      x.dtype === 'custom' ) {
-    buffer = pool.mallocDouble(buf_size)
+    exports._ = _;
   } else {
-    buffer = pool.mallocFloat(buf_size)
+    root._ = _;
   }
-  var x1 = ndarray(buffer, shape.slice(0), stride, 0)
-    , y1 = ndarray(buffer, shape.slice(0), stride.slice(0), size)
-    , x2 = ndarray(buffer, shape.slice(0), stride.slice(0), 2*size)
-    , y2 = ndarray(buffer, shape.slice(0), stride.slice(0), 3*size)
-    , tmp, n, s1, s2
-    , scratch_ptr = 4 * size
-  
-  //Copy into x1/y1
-  ops.assign(x1, x)
-  ops.assign(y1, y)
-  
-  for(i=d-1; i>=0; --i) {
-    fftm(dir, size/shape[i], shape[i], buffer, x1.offset, y1.offset, scratch_ptr)
-    if(i === 0) {
-      break
+
+  // Current version.
+  _.VERSION = '1.8.3';
+
+  // Internal function that returns an efficient (for current engines) version
+  // of the passed-in callback, to be repeatedly applied in other Underscore
+  // functions.
+  var optimizeCb = function(func, context, argCount) {
+    if (context === void 0) return func;
+    switch (argCount == null ? 3 : argCount) {
+      case 1: return function(value) {
+        return func.call(context, value);
+      };
+      case 2: return function(value, other) {
+        return func.call(context, value, other);
+      };
+      case 3: return function(value, index, collection) {
+        return func.call(context, value, index, collection);
+      };
+      case 4: return function(accumulator, value, index, collection) {
+        return func.call(context, accumulator, value, index, collection);
+      };
     }
-    
-    //Compute new stride for x2/y2
-    n = 1
-    s1 = x2.stride
-    s2 = y2.stride
-    for(j=i-1; j<d; ++j) {
-      s2[j] = s1[j] = n
-      n *= shape[j]
-    }
-    for(j=i-2; j>=0; --j) {
-      s2[j] = s1[j] = n
-      n *= shape[j]
-    }
-    
-    //Transpose
-    ops.assign(x2, x1)
-    ops.assign(y2, y1)
-    
-    //Swap buffers
-    tmp = x1
-    x1 = x2
-    x2 = tmp
-    tmp = y1
-    y1 = y2
-    y2 = tmp
-  }
-  
-  //Copy result back into x
-  ops.assign(x, x1)
-  ops.assign(y, y1)
-  
-  pool.free(buffer)
-}
+    return function() {
+      return func.apply(context, arguments);
+    };
+  };
 
-module.exports = ndfft
+  // A mostly-internal function to generate callbacks that can be applied
+  // to each element in a collection, returning the desired result — either
+  // identity, an arbitrary callback, a property matcher, or a property accessor.
+  var cb = function(value, context, argCount) {
+    if (value == null) return _.identity;
+    if (_.isFunction(value)) return optimizeCb(value, context, argCount);
+    if (_.isObject(value)) return _.matcher(value);
+    return _.property(value);
+  };
+  _.iteratee = function(value, context) {
+    return cb(value, context, Infinity);
+  };
 
-/***/ }),
-/* 27 */
-/***/ (function(module, exports, __webpack_require__) {
-
-var bits = __webpack_require__(0)
-
-function fft(dir, nrows, ncols, buffer, x_ptr, y_ptr, scratch_ptr) {
-  dir |= 0
-  nrows |= 0
-  ncols |= 0
-  x_ptr |= 0
-  y_ptr |= 0
-  if(bits.isPow2(ncols)) {
-    fftRadix2(dir, nrows, ncols, buffer, x_ptr, y_ptr)
-  } else {
-    fftBluestein(dir, nrows, ncols, buffer, x_ptr, y_ptr, scratch_ptr)
-  }
-}
-module.exports = fft
-
-function scratchMemory(n) {
-  if(bits.isPow2(n)) {
-    return 0
-  }
-  return 2 * n + 4 * bits.nextPow2(2*n + 1)
-}
-module.exports.scratchMemory = scratchMemory
-
-
-//Radix 2 FFT Adapted from Paul Bourke's C Implementation
-function fftRadix2(dir, nrows, ncols, buffer, x_ptr, y_ptr) {
-  dir |= 0
-  nrows |= 0
-  ncols |= 0
-  x_ptr |= 0
-  y_ptr |= 0
-  var nn,m,i,i1,j,k,i2,l,l1,l2
-  var c1,c2,t,t1,t2,u1,u2,z,row,a,b,c,d,k1,k2,k3
-  
-  // Calculate the number of points
-  nn = ncols
-  m = bits.log2(nn)
-  
-  for(row=0; row<nrows; ++row) {  
-    // Do the bit reversal
-    i2 = nn >> 1;
-    j = 0;
-    for(i=0;i<nn-1;i++) {
-      if(i < j) {
-        t = buffer[x_ptr+i]
-        buffer[x_ptr+i] = buffer[x_ptr+j]
-        buffer[x_ptr+j] = t
-        t = buffer[y_ptr+i]
-        buffer[y_ptr+i] = buffer[y_ptr+j]
-        buffer[y_ptr+j] = t
-      }
-      k = i2
-      while(k <= j) {
-        j -= k
-        k >>= 1
-      }
-      j += k
-    }
-    
-    // Compute the FFT
-    c1 = -1.0
-    c2 = 0.0
-    l2 = 1
-    for(l=0;l<m;l++) {
-      l1 = l2
-      l2 <<= 1
-      u1 = 1.0
-      u2 = 0.0
-      for(j=0;j<l1;j++) {
-        for(i=j;i<nn;i+=l2) {
-          i1 = i + l1
-          a = buffer[x_ptr+i1]
-          b = buffer[y_ptr+i1]
-          c = buffer[x_ptr+i]
-          d = buffer[y_ptr+i]
-          k1 = u1 * (a + b)
-          k2 = a * (u2 - u1)
-          k3 = b * (u1 + u2)
-          t1 = k1 - k3
-          t2 = k1 + k2
-          buffer[x_ptr+i1] = c - t1
-          buffer[y_ptr+i1] = d - t2
-          buffer[x_ptr+i] += t1
-          buffer[y_ptr+i] += t2
+  // An internal function for creating assigner functions.
+  var createAssigner = function(keysFunc, undefinedOnly) {
+    return function(obj) {
+      var length = arguments.length;
+      if (length < 2 || obj == null) return obj;
+      for (var index = 1; index < length; index++) {
+        var source = arguments[index],
+            keys = keysFunc(source),
+            l = keys.length;
+        for (var i = 0; i < l; i++) {
+          var key = keys[i];
+          if (!undefinedOnly || obj[key] === void 0) obj[key] = source[key];
         }
-        k1 = c1 * (u1 + u2)
-        k2 = u1 * (c2 - c1)
-        k3 = u2 * (c1 + c2)
-        u1 = k1 - k3
-        u2 = k1 + k2
       }
-      c2 = Math.sqrt((1.0 - c1) / 2.0)
-      if(dir < 0) {
-        c2 = -c2
+      return obj;
+    };
+  };
+
+  // An internal function for creating a new object that inherits from another.
+  var baseCreate = function(prototype) {
+    if (!_.isObject(prototype)) return {};
+    if (nativeCreate) return nativeCreate(prototype);
+    Ctor.prototype = prototype;
+    var result = new Ctor;
+    Ctor.prototype = null;
+    return result;
+  };
+
+  var property = function(key) {
+    return function(obj) {
+      return obj == null ? void 0 : obj[key];
+    };
+  };
+
+  // Helper for collection methods to determine whether a collection
+  // should be iterated as an array or as an object
+  // Related: http://people.mozilla.org/~jorendorff/es6-draft.html#sec-tolength
+  // Avoids a very nasty iOS 8 JIT bug on ARM-64. #2094
+  var MAX_ARRAY_INDEX = Math.pow(2, 53) - 1;
+  var getLength = property('length');
+  var isArrayLike = function(collection) {
+    var length = getLength(collection);
+    return typeof length == 'number' && length >= 0 && length <= MAX_ARRAY_INDEX;
+  };
+
+  // Collection Functions
+  // --------------------
+
+  // The cornerstone, an `each` implementation, aka `forEach`.
+  // Handles raw objects in addition to array-likes. Treats all
+  // sparse array-likes as if they were dense.
+  _.each = _.forEach = function(obj, iteratee, context) {
+    iteratee = optimizeCb(iteratee, context);
+    var i, length;
+    if (isArrayLike(obj)) {
+      for (i = 0, length = obj.length; i < length; i++) {
+        iteratee(obj[i], i, obj);
       }
-      c1 = Math.sqrt((1.0 + c1) / 2.0)
-    }
-    
-    // Scaling for inverse transform
-    if(dir < 0) {
-      var scale_f = 1.0 / nn
-      for(i=0;i<nn;i++) {
-        buffer[x_ptr+i] *= scale_f
-        buffer[y_ptr+i] *= scale_f
+    } else {
+      var keys = _.keys(obj);
+      for (i = 0, length = keys.length; i < length; i++) {
+        iteratee(obj[keys[i]], keys[i], obj);
       }
     }
-    
-    // Advance pointers
-    x_ptr += ncols
-    y_ptr += ncols
-  }
-}
+    return obj;
+  };
 
-// Use Bluestein algorithm for npot FFTs
-// Scratch memory required:  2 * ncols + 4 * bits.nextPow2(2*ncols + 1)
-function fftBluestein(dir, nrows, ncols, buffer, x_ptr, y_ptr, scratch_ptr) {
-  dir |= 0
-  nrows |= 0
-  ncols |= 0
-  x_ptr |= 0
-  y_ptr |= 0
-  scratch_ptr |= 0
+  // Return the results of applying the iteratee to each element.
+  _.map = _.collect = function(obj, iteratee, context) {
+    iteratee = cb(iteratee, context);
+    var keys = !isArrayLike(obj) && _.keys(obj),
+        length = (keys || obj).length,
+        results = Array(length);
+    for (var index = 0; index < length; index++) {
+      var currentKey = keys ? keys[index] : index;
+      results[index] = iteratee(obj[currentKey], currentKey, obj);
+    }
+    return results;
+  };
 
-  // Initialize tables
-  var m = bits.nextPow2(2 * ncols + 1)
-    , cos_ptr = scratch_ptr
-    , sin_ptr = cos_ptr + ncols
-    , xs_ptr  = sin_ptr + ncols
-    , ys_ptr  = xs_ptr  + m
-    , cft_ptr = ys_ptr  + m
-    , sft_ptr = cft_ptr + m
-    , w = -dir * Math.PI / ncols
-    , row, a, b, c, d, k1, k2, k3
-    , i
-  for(i=0; i<ncols; ++i) {
-    a = w * ((i * i) % (ncols * 2))
-    c = Math.cos(a)
-    d = Math.sin(a)
-    buffer[cft_ptr+(m-i)] = buffer[cft_ptr+i] = buffer[cos_ptr+i] = c
-    buffer[sft_ptr+(m-i)] = buffer[sft_ptr+i] = buffer[sin_ptr+i] = d
-  }
-  for(i=ncols; i<=m-ncols; ++i) {
-    buffer[cft_ptr+i] = 0.0
-  }
-  for(i=ncols; i<=m-ncols; ++i) {
-    buffer[sft_ptr+i] = 0.0
+  // Create a reducing function iterating left or right.
+  function createReduce(dir) {
+    // Optimized iterator function as using arguments.length
+    // in the main function will deoptimize the, see #1991.
+    function iterator(obj, iteratee, memo, keys, index, length) {
+      for (; index >= 0 && index < length; index += dir) {
+        var currentKey = keys ? keys[index] : index;
+        memo = iteratee(memo, obj[currentKey], currentKey, obj);
+      }
+      return memo;
+    }
+
+    return function(obj, iteratee, memo, context) {
+      iteratee = optimizeCb(iteratee, context, 4);
+      var keys = !isArrayLike(obj) && _.keys(obj),
+          length = (keys || obj).length,
+          index = dir > 0 ? 0 : length - 1;
+      // Determine the initial value if none is provided.
+      if (arguments.length < 3) {
+        memo = obj[keys ? keys[index] : index];
+        index += dir;
+      }
+      return iterator(obj, iteratee, memo, keys, index, length);
+    };
   }
 
-  fftRadix2(1, 1, m, buffer, cft_ptr, sft_ptr)
-  
-  //Compute scale factor
-  if(dir < 0) {
-    w = 1.0 / ncols
-  } else {
-    w = 1.0
+  // **Reduce** builds up a single result from a list of values, aka `inject`,
+  // or `foldl`.
+  _.reduce = _.foldl = _.inject = createReduce(1);
+
+  // The right-associative version of reduce, also known as `foldr`.
+  _.reduceRight = _.foldr = createReduce(-1);
+
+  // Return the first value which passes a truth test. Aliased as `detect`.
+  _.find = _.detect = function(obj, predicate, context) {
+    var key;
+    if (isArrayLike(obj)) {
+      key = _.findIndex(obj, predicate, context);
+    } else {
+      key = _.findKey(obj, predicate, context);
+    }
+    if (key !== void 0 && key !== -1) return obj[key];
+  };
+
+  // Return all the elements that pass a truth test.
+  // Aliased as `select`.
+  _.filter = _.select = function(obj, predicate, context) {
+    var results = [];
+    predicate = cb(predicate, context);
+    _.each(obj, function(value, index, list) {
+      if (predicate(value, index, list)) results.push(value);
+    });
+    return results;
+  };
+
+  // Return all the elements for which a truth test fails.
+  _.reject = function(obj, predicate, context) {
+    return _.filter(obj, _.negate(cb(predicate)), context);
+  };
+
+  // Determine whether all of the elements match a truth test.
+  // Aliased as `all`.
+  _.every = _.all = function(obj, predicate, context) {
+    predicate = cb(predicate, context);
+    var keys = !isArrayLike(obj) && _.keys(obj),
+        length = (keys || obj).length;
+    for (var index = 0; index < length; index++) {
+      var currentKey = keys ? keys[index] : index;
+      if (!predicate(obj[currentKey], currentKey, obj)) return false;
+    }
+    return true;
+  };
+
+  // Determine if at least one element in the object matches a truth test.
+  // Aliased as `any`.
+  _.some = _.any = function(obj, predicate, context) {
+    predicate = cb(predicate, context);
+    var keys = !isArrayLike(obj) && _.keys(obj),
+        length = (keys || obj).length;
+    for (var index = 0; index < length; index++) {
+      var currentKey = keys ? keys[index] : index;
+      if (predicate(obj[currentKey], currentKey, obj)) return true;
+    }
+    return false;
+  };
+
+  // Determine if the array or object contains a given item (using `===`).
+  // Aliased as `includes` and `include`.
+  _.contains = _.includes = _.include = function(obj, item, fromIndex, guard) {
+    if (!isArrayLike(obj)) obj = _.values(obj);
+    if (typeof fromIndex != 'number' || guard) fromIndex = 0;
+    return _.indexOf(obj, item, fromIndex) >= 0;
+  };
+
+  // Invoke a method (with arguments) on every item in a collection.
+  _.invoke = function(obj, method) {
+    var args = slice.call(arguments, 2);
+    var isFunc = _.isFunction(method);
+    return _.map(obj, function(value) {
+      var func = isFunc ? method : value[method];
+      return func == null ? func : func.apply(value, args);
+    });
+  };
+
+  // Convenience version of a common use case of `map`: fetching a property.
+  _.pluck = function(obj, key) {
+    return _.map(obj, _.property(key));
+  };
+
+  // Convenience version of a common use case of `filter`: selecting only objects
+  // containing specific `key:value` pairs.
+  _.where = function(obj, attrs) {
+    return _.filter(obj, _.matcher(attrs));
+  };
+
+  // Convenience version of a common use case of `find`: getting the first object
+  // containing specific `key:value` pairs.
+  _.findWhere = function(obj, attrs) {
+    return _.find(obj, _.matcher(attrs));
+  };
+
+  // Return the maximum element (or element-based computation).
+  _.max = function(obj, iteratee, context) {
+    var result = -Infinity, lastComputed = -Infinity,
+        value, computed;
+    if (iteratee == null && obj != null) {
+      obj = isArrayLike(obj) ? obj : _.values(obj);
+      for (var i = 0, length = obj.length; i < length; i++) {
+        value = obj[i];
+        if (value > result) {
+          result = value;
+        }
+      }
+    } else {
+      iteratee = cb(iteratee, context);
+      _.each(obj, function(value, index, list) {
+        computed = iteratee(value, index, list);
+        if (computed > lastComputed || computed === -Infinity && result === -Infinity) {
+          result = value;
+          lastComputed = computed;
+        }
+      });
+    }
+    return result;
+  };
+
+  // Return the minimum element (or element-based computation).
+  _.min = function(obj, iteratee, context) {
+    var result = Infinity, lastComputed = Infinity,
+        value, computed;
+    if (iteratee == null && obj != null) {
+      obj = isArrayLike(obj) ? obj : _.values(obj);
+      for (var i = 0, length = obj.length; i < length; i++) {
+        value = obj[i];
+        if (value < result) {
+          result = value;
+        }
+      }
+    } else {
+      iteratee = cb(iteratee, context);
+      _.each(obj, function(value, index, list) {
+        computed = iteratee(value, index, list);
+        if (computed < lastComputed || computed === Infinity && result === Infinity) {
+          result = value;
+          lastComputed = computed;
+        }
+      });
+    }
+    return result;
+  };
+
+  // Shuffle a collection, using the modern version of the
+  // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
+  _.shuffle = function(obj) {
+    var set = isArrayLike(obj) ? obj : _.values(obj);
+    var length = set.length;
+    var shuffled = Array(length);
+    for (var index = 0, rand; index < length; index++) {
+      rand = _.random(0, index);
+      if (rand !== index) shuffled[index] = shuffled[rand];
+      shuffled[rand] = set[index];
+    }
+    return shuffled;
+  };
+
+  // Sample **n** random values from a collection.
+  // If **n** is not specified, returns a single random element.
+  // The internal `guard` argument allows it to work with `map`.
+  _.sample = function(obj, n, guard) {
+    if (n == null || guard) {
+      if (!isArrayLike(obj)) obj = _.values(obj);
+      return obj[_.random(obj.length - 1)];
+    }
+    return _.shuffle(obj).slice(0, Math.max(0, n));
+  };
+
+  // Sort the object's values by a criterion produced by an iteratee.
+  _.sortBy = function(obj, iteratee, context) {
+    iteratee = cb(iteratee, context);
+    return _.pluck(_.map(obj, function(value, index, list) {
+      return {
+        value: value,
+        index: index,
+        criteria: iteratee(value, index, list)
+      };
+    }).sort(function(left, right) {
+      var a = left.criteria;
+      var b = right.criteria;
+      if (a !== b) {
+        if (a > b || a === void 0) return 1;
+        if (a < b || b === void 0) return -1;
+      }
+      return left.index - right.index;
+    }), 'value');
+  };
+
+  // An internal function used for aggregate "group by" operations.
+  var group = function(behavior) {
+    return function(obj, iteratee, context) {
+      var result = {};
+      iteratee = cb(iteratee, context);
+      _.each(obj, function(value, index) {
+        var key = iteratee(value, index, obj);
+        behavior(result, value, key);
+      });
+      return result;
+    };
+  };
+
+  // Groups the object's values by a criterion. Pass either a string attribute
+  // to group by, or a function that returns the criterion.
+  _.groupBy = group(function(result, value, key) {
+    if (_.has(result, key)) result[key].push(value); else result[key] = [value];
+  });
+
+  // Indexes the object's values by a criterion, similar to `groupBy`, but for
+  // when you know that your index values will be unique.
+  _.indexBy = group(function(result, value, key) {
+    result[key] = value;
+  });
+
+  // Counts instances of an object that group by a certain criterion. Pass
+  // either a string attribute to count by, or a function that returns the
+  // criterion.
+  _.countBy = group(function(result, value, key) {
+    if (_.has(result, key)) result[key]++; else result[key] = 1;
+  });
+
+  // Safely create a real, live array from anything iterable.
+  _.toArray = function(obj) {
+    if (!obj) return [];
+    if (_.isArray(obj)) return slice.call(obj);
+    if (isArrayLike(obj)) return _.map(obj, _.identity);
+    return _.values(obj);
+  };
+
+  // Return the number of elements in an object.
+  _.size = function(obj) {
+    if (obj == null) return 0;
+    return isArrayLike(obj) ? obj.length : _.keys(obj).length;
+  };
+
+  // Split a collection into two arrays: one whose elements all satisfy the given
+  // predicate, and one whose elements all do not satisfy the predicate.
+  _.partition = function(obj, predicate, context) {
+    predicate = cb(predicate, context);
+    var pass = [], fail = [];
+    _.each(obj, function(value, key, obj) {
+      (predicate(value, key, obj) ? pass : fail).push(value);
+    });
+    return [pass, fail];
+  };
+
+  // Array Functions
+  // ---------------
+
+  // Get the first element of an array. Passing **n** will return the first N
+  // values in the array. Aliased as `head` and `take`. The **guard** check
+  // allows it to work with `_.map`.
+  _.first = _.head = _.take = function(array, n, guard) {
+    if (array == null) return void 0;
+    if (n == null || guard) return array[0];
+    return _.initial(array, array.length - n);
+  };
+
+  // Returns everything but the last entry of the array. Especially useful on
+  // the arguments object. Passing **n** will return all the values in
+  // the array, excluding the last N.
+  _.initial = function(array, n, guard) {
+    return slice.call(array, 0, Math.max(0, array.length - (n == null || guard ? 1 : n)));
+  };
+
+  // Get the last element of an array. Passing **n** will return the last N
+  // values in the array.
+  _.last = function(array, n, guard) {
+    if (array == null) return void 0;
+    if (n == null || guard) return array[array.length - 1];
+    return _.rest(array, Math.max(0, array.length - n));
+  };
+
+  // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
+  // Especially useful on the arguments object. Passing an **n** will return
+  // the rest N values in the array.
+  _.rest = _.tail = _.drop = function(array, n, guard) {
+    return slice.call(array, n == null || guard ? 1 : n);
+  };
+
+  // Trim out all falsy values from an array.
+  _.compact = function(array) {
+    return _.filter(array, _.identity);
+  };
+
+  // Internal implementation of a recursive `flatten` function.
+  var flatten = function(input, shallow, strict, startIndex) {
+    var output = [], idx = 0;
+    for (var i = startIndex || 0, length = getLength(input); i < length; i++) {
+      var value = input[i];
+      if (isArrayLike(value) && (_.isArray(value) || _.isArguments(value))) {
+        //flatten current level of array or arguments object
+        if (!shallow) value = flatten(value, shallow, strict);
+        var j = 0, len = value.length;
+        output.length += len;
+        while (j < len) {
+          output[idx++] = value[j++];
+        }
+      } else if (!strict) {
+        output[idx++] = value;
+      }
+    }
+    return output;
+  };
+
+  // Flatten out an array, either recursively (by default), or just one level.
+  _.flatten = function(array, shallow) {
+    return flatten(array, shallow, false);
+  };
+
+  // Return a version of the array that does not contain the specified value(s).
+  _.without = function(array) {
+    return _.difference(array, slice.call(arguments, 1));
+  };
+
+  // Produce a duplicate-free version of the array. If the array has already
+  // been sorted, you have the option of using a faster algorithm.
+  // Aliased as `unique`.
+  _.uniq = _.unique = function(array, isSorted, iteratee, context) {
+    if (!_.isBoolean(isSorted)) {
+      context = iteratee;
+      iteratee = isSorted;
+      isSorted = false;
+    }
+    if (iteratee != null) iteratee = cb(iteratee, context);
+    var result = [];
+    var seen = [];
+    for (var i = 0, length = getLength(array); i < length; i++) {
+      var value = array[i],
+          computed = iteratee ? iteratee(value, i, array) : value;
+      if (isSorted) {
+        if (!i || seen !== computed) result.push(value);
+        seen = computed;
+      } else if (iteratee) {
+        if (!_.contains(seen, computed)) {
+          seen.push(computed);
+          result.push(value);
+        }
+      } else if (!_.contains(result, value)) {
+        result.push(value);
+      }
+    }
+    return result;
+  };
+
+  // Produce an array that contains the union: each distinct element from all of
+  // the passed-in arrays.
+  _.union = function() {
+    return _.uniq(flatten(arguments, true, true));
+  };
+
+  // Produce an array that contains every item shared between all the
+  // passed-in arrays.
+  _.intersection = function(array) {
+    var result = [];
+    var argsLength = arguments.length;
+    for (var i = 0, length = getLength(array); i < length; i++) {
+      var item = array[i];
+      if (_.contains(result, item)) continue;
+      for (var j = 1; j < argsLength; j++) {
+        if (!_.contains(arguments[j], item)) break;
+      }
+      if (j === argsLength) result.push(item);
+    }
+    return result;
+  };
+
+  // Take the difference between one array and a number of other arrays.
+  // Only the elements present in just the first array will remain.
+  _.difference = function(array) {
+    var rest = flatten(arguments, true, true, 1);
+    return _.filter(array, function(value){
+      return !_.contains(rest, value);
+    });
+  };
+
+  // Zip together multiple lists into a single array -- elements that share
+  // an index go together.
+  _.zip = function() {
+    return _.unzip(arguments);
+  };
+
+  // Complement of _.zip. Unzip accepts an array of arrays and groups
+  // each array's elements on shared indices
+  _.unzip = function(array) {
+    var length = array && _.max(array, getLength).length || 0;
+    var result = Array(length);
+
+    for (var index = 0; index < length; index++) {
+      result[index] = _.pluck(array, index);
+    }
+    return result;
+  };
+
+  // Converts lists into objects. Pass either a single array of `[key, value]`
+  // pairs, or two parallel arrays of the same length -- one of keys, and one of
+  // the corresponding values.
+  _.object = function(list, values) {
+    var result = {};
+    for (var i = 0, length = getLength(list); i < length; i++) {
+      if (values) {
+        result[list[i]] = values[i];
+      } else {
+        result[list[i][0]] = list[i][1];
+      }
+    }
+    return result;
+  };
+
+  // Generator function to create the findIndex and findLastIndex functions
+  function createPredicateIndexFinder(dir) {
+    return function(array, predicate, context) {
+      predicate = cb(predicate, context);
+      var length = getLength(array);
+      var index = dir > 0 ? 0 : length - 1;
+      for (; index >= 0 && index < length; index += dir) {
+        if (predicate(array[index], index, array)) return index;
+      }
+      return -1;
+    };
   }
-  
-  //Handle direction
-  for(row=0; row<nrows; ++row) {
-  
-    // Copy row into scratch memory, multiply weights
-    for(i=0; i<ncols; ++i) {
-      a = buffer[x_ptr+i]
-      b = buffer[y_ptr+i]
-      c = buffer[cos_ptr+i]
-      d = -buffer[sin_ptr+i]
-      k1 = c * (a + b)
-      k2 = a * (d - c)
-      k3 = b * (c + d)
-      buffer[xs_ptr+i] = k1 - k3
-      buffer[ys_ptr+i] = k1 + k2
+
+  // Returns the first index on an array-like that passes a predicate test
+  _.findIndex = createPredicateIndexFinder(1);
+  _.findLastIndex = createPredicateIndexFinder(-1);
+
+  // Use a comparator function to figure out the smallest index at which
+  // an object should be inserted so as to maintain order. Uses binary search.
+  _.sortedIndex = function(array, obj, iteratee, context) {
+    iteratee = cb(iteratee, context, 1);
+    var value = iteratee(obj);
+    var low = 0, high = getLength(array);
+    while (low < high) {
+      var mid = Math.floor((low + high) / 2);
+      if (iteratee(array[mid]) < value) low = mid + 1; else high = mid;
     }
-    //Zero out the rest
-    for(i=ncols; i<m; ++i) {
-      buffer[xs_ptr+i] = 0.0
-    }
-    for(i=ncols; i<m; ++i) {
-      buffer[ys_ptr+i] = 0.0
-    }
-    
-    // FFT buffer
-    fftRadix2(1, 1, m, buffer, xs_ptr, ys_ptr)
-    
-    // Apply multiplier
-    for(i=0; i<m; ++i) {
-      a = buffer[xs_ptr+i]
-      b = buffer[ys_ptr+i]
-      c = buffer[cft_ptr+i]
-      d = buffer[sft_ptr+i]
-      k1 = c * (a + b)
-      k2 = a * (d - c)
-      k3 = b * (c + d)
-      buffer[xs_ptr+i] = k1 - k3
-      buffer[ys_ptr+i] = k1 + k2
-    }
-    
-    // Inverse FFT buffer
-    fftRadix2(-1, 1, m, buffer, xs_ptr, ys_ptr)
-    
-    // Copy result back into x/y
-    for(i=0; i<ncols; ++i) {
-      a = buffer[xs_ptr+i]
-      b = buffer[ys_ptr+i]
-      c = buffer[cos_ptr+i]
-      d = -buffer[sin_ptr+i]
-      k1 = c * (a + b)
-      k2 = a * (d - c)
-      k3 = b * (c + d)
-      buffer[x_ptr+i] = w * (k1 - k3)
-      buffer[y_ptr+i] = w * (k1 + k2)
-    }
-    
-    x_ptr += ncols
-    y_ptr += ncols
+    return low;
+  };
+
+  // Generator function to create the indexOf and lastIndexOf functions
+  function createIndexFinder(dir, predicateFind, sortedIndex) {
+    return function(array, item, idx) {
+      var i = 0, length = getLength(array);
+      if (typeof idx == 'number') {
+        if (dir > 0) {
+            i = idx >= 0 ? idx : Math.max(idx + length, i);
+        } else {
+            length = idx >= 0 ? Math.min(idx + 1, length) : idx + length + 1;
+        }
+      } else if (sortedIndex && idx && length) {
+        idx = sortedIndex(array, item);
+        return array[idx] === item ? idx : -1;
+      }
+      if (item !== item) {
+        idx = predicateFind(slice.call(array, i, length), _.isNaN);
+        return idx >= 0 ? idx + i : -1;
+      }
+      for (idx = dir > 0 ? i : length - 1; idx >= 0 && idx < length; idx += dir) {
+        if (array[idx] === item) return idx;
+      }
+      return -1;
+    };
   }
-}
+
+  // Return the position of the first occurrence of an item in an array,
+  // or -1 if the item is not included in the array.
+  // If the array is large and already in sort order, pass `true`
+  // for **isSorted** to use binary search.
+  _.indexOf = createIndexFinder(1, _.findIndex, _.sortedIndex);
+  _.lastIndexOf = createIndexFinder(-1, _.findLastIndex);
+
+  // Generate an integer Array containing an arithmetic progression. A port of
+  // the native Python `range()` function. See
+  // [the Python documentation](http://docs.python.org/library/functions.html#range).
+  _.range = function(start, stop, step) {
+    if (stop == null) {
+      stop = start || 0;
+      start = 0;
+    }
+    step = step || 1;
+
+    var length = Math.max(Math.ceil((stop - start) / step), 0);
+    var range = Array(length);
+
+    for (var idx = 0; idx < length; idx++, start += step) {
+      range[idx] = start;
+    }
+
+    return range;
+  };
+
+  // Function (ahem) Functions
+  // ------------------
+
+  // Determines whether to execute a function as a constructor
+  // or a normal function with the provided arguments
+  var executeBound = function(sourceFunc, boundFunc, context, callingContext, args) {
+    if (!(callingContext instanceof boundFunc)) return sourceFunc.apply(context, args);
+    var self = baseCreate(sourceFunc.prototype);
+    var result = sourceFunc.apply(self, args);
+    if (_.isObject(result)) return result;
+    return self;
+  };
+
+  // Create a function bound to a given object (assigning `this`, and arguments,
+  // optionally). Delegates to **ECMAScript 5**'s native `Function.bind` if
+  // available.
+  _.bind = function(func, context) {
+    if (nativeBind && func.bind === nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
+    if (!_.isFunction(func)) throw new TypeError('Bind must be called on a function');
+    var args = slice.call(arguments, 2);
+    var bound = function() {
+      return executeBound(func, bound, context, this, args.concat(slice.call(arguments)));
+    };
+    return bound;
+  };
+
+  // Partially apply a function by creating a version that has had some of its
+  // arguments pre-filled, without changing its dynamic `this` context. _ acts
+  // as a placeholder, allowing any combination of arguments to be pre-filled.
+  _.partial = function(func) {
+    var boundArgs = slice.call(arguments, 1);
+    var bound = function() {
+      var position = 0, length = boundArgs.length;
+      var args = Array(length);
+      for (var i = 0; i < length; i++) {
+        args[i] = boundArgs[i] === _ ? arguments[position++] : boundArgs[i];
+      }
+      while (position < arguments.length) args.push(arguments[position++]);
+      return executeBound(func, bound, this, this, args);
+    };
+    return bound;
+  };
+
+  // Bind a number of an object's methods to that object. Remaining arguments
+  // are the method names to be bound. Useful for ensuring that all callbacks
+  // defined on an object belong to it.
+  _.bindAll = function(obj) {
+    var i, length = arguments.length, key;
+    if (length <= 1) throw new Error('bindAll must be passed function names');
+    for (i = 1; i < length; i++) {
+      key = arguments[i];
+      obj[key] = _.bind(obj[key], obj);
+    }
+    return obj;
+  };
+
+  // Memoize an expensive function by storing its results.
+  _.memoize = function(func, hasher) {
+    var memoize = function(key) {
+      var cache = memoize.cache;
+      var address = '' + (hasher ? hasher.apply(this, arguments) : key);
+      if (!_.has(cache, address)) cache[address] = func.apply(this, arguments);
+      return cache[address];
+    };
+    memoize.cache = {};
+    return memoize;
+  };
+
+  // Delays a function for the given number of milliseconds, and then calls
+  // it with the arguments supplied.
+  _.delay = function(func, wait) {
+    var args = slice.call(arguments, 2);
+    return setTimeout(function(){
+      return func.apply(null, args);
+    }, wait);
+  };
+
+  // Defers a function, scheduling it to run after the current call stack has
+  // cleared.
+  _.defer = _.partial(_.delay, _, 1);
+
+  // Returns a function, that, when invoked, will only be triggered at most once
+  // during a given window of time. Normally, the throttled function will run
+  // as much as it can, without ever going more than once per `wait` duration;
+  // but if you'd like to disable the execution on the leading edge, pass
+  // `{leading: false}`. To disable execution on the trailing edge, ditto.
+  _.throttle = function(func, wait, options) {
+    var context, args, result;
+    var timeout = null;
+    var previous = 0;
+    if (!options) options = {};
+    var later = function() {
+      previous = options.leading === false ? 0 : _.now();
+      timeout = null;
+      result = func.apply(context, args);
+      if (!timeout) context = args = null;
+    };
+    return function() {
+      var now = _.now();
+      if (!previous && options.leading === false) previous = now;
+      var remaining = wait - (now - previous);
+      context = this;
+      args = arguments;
+      if (remaining <= 0 || remaining > wait) {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        previous = now;
+        result = func.apply(context, args);
+        if (!timeout) context = args = null;
+      } else if (!timeout && options.trailing !== false) {
+        timeout = setTimeout(later, remaining);
+      }
+      return result;
+    };
+  };
+
+  // Returns a function, that, as long as it continues to be invoked, will not
+  // be triggered. The function will be called after it stops being called for
+  // N milliseconds. If `immediate` is passed, trigger the function on the
+  // leading edge, instead of the trailing.
+  _.debounce = function(func, wait, immediate) {
+    var timeout, args, context, timestamp, result;
+
+    var later = function() {
+      var last = _.now() - timestamp;
+
+      if (last < wait && last >= 0) {
+        timeout = setTimeout(later, wait - last);
+      } else {
+        timeout = null;
+        if (!immediate) {
+          result = func.apply(context, args);
+          if (!timeout) context = args = null;
+        }
+      }
+    };
+
+    return function() {
+      context = this;
+      args = arguments;
+      timestamp = _.now();
+      var callNow = immediate && !timeout;
+      if (!timeout) timeout = setTimeout(later, wait);
+      if (callNow) {
+        result = func.apply(context, args);
+        context = args = null;
+      }
+
+      return result;
+    };
+  };
+
+  // Returns the first function passed as an argument to the second,
+  // allowing you to adjust arguments, run code before and after, and
+  // conditionally execute the original function.
+  _.wrap = function(func, wrapper) {
+    return _.partial(wrapper, func);
+  };
+
+  // Returns a negated version of the passed-in predicate.
+  _.negate = function(predicate) {
+    return function() {
+      return !predicate.apply(this, arguments);
+    };
+  };
+
+  // Returns a function that is the composition of a list of functions, each
+  // consuming the return value of the function that follows.
+  _.compose = function() {
+    var args = arguments;
+    var start = args.length - 1;
+    return function() {
+      var i = start;
+      var result = args[start].apply(this, arguments);
+      while (i--) result = args[i].call(this, result);
+      return result;
+    };
+  };
+
+  // Returns a function that will only be executed on and after the Nth call.
+  _.after = function(times, func) {
+    return function() {
+      if (--times < 1) {
+        return func.apply(this, arguments);
+      }
+    };
+  };
+
+  // Returns a function that will only be executed up to (but not including) the Nth call.
+  _.before = function(times, func) {
+    var memo;
+    return function() {
+      if (--times > 0) {
+        memo = func.apply(this, arguments);
+      }
+      if (times <= 1) func = null;
+      return memo;
+    };
+  };
+
+  // Returns a function that will be executed at most one time, no matter how
+  // often you call it. Useful for lazy initialization.
+  _.once = _.partial(_.before, 2);
+
+  // Object Functions
+  // ----------------
+
+  // Keys in IE < 9 that won't be iterated by `for key in ...` and thus missed.
+  var hasEnumBug = !{toString: null}.propertyIsEnumerable('toString');
+  var nonEnumerableProps = ['valueOf', 'isPrototypeOf', 'toString',
+                      'propertyIsEnumerable', 'hasOwnProperty', 'toLocaleString'];
+
+  function collectNonEnumProps(obj, keys) {
+    var nonEnumIdx = nonEnumerableProps.length;
+    var constructor = obj.constructor;
+    var proto = (_.isFunction(constructor) && constructor.prototype) || ObjProto;
+
+    // Constructor is a special case.
+    var prop = 'constructor';
+    if (_.has(obj, prop) && !_.contains(keys, prop)) keys.push(prop);
+
+    while (nonEnumIdx--) {
+      prop = nonEnumerableProps[nonEnumIdx];
+      if (prop in obj && obj[prop] !== proto[prop] && !_.contains(keys, prop)) {
+        keys.push(prop);
+      }
+    }
+  }
+
+  // Retrieve the names of an object's own properties.
+  // Delegates to **ECMAScript 5**'s native `Object.keys`
+  _.keys = function(obj) {
+    if (!_.isObject(obj)) return [];
+    if (nativeKeys) return nativeKeys(obj);
+    var keys = [];
+    for (var key in obj) if (_.has(obj, key)) keys.push(key);
+    // Ahem, IE < 9.
+    if (hasEnumBug) collectNonEnumProps(obj, keys);
+    return keys;
+  };
+
+  // Retrieve all the property names of an object.
+  _.allKeys = function(obj) {
+    if (!_.isObject(obj)) return [];
+    var keys = [];
+    for (var key in obj) keys.push(key);
+    // Ahem, IE < 9.
+    if (hasEnumBug) collectNonEnumProps(obj, keys);
+    return keys;
+  };
+
+  // Retrieve the values of an object's properties.
+  _.values = function(obj) {
+    var keys = _.keys(obj);
+    var length = keys.length;
+    var values = Array(length);
+    for (var i = 0; i < length; i++) {
+      values[i] = obj[keys[i]];
+    }
+    return values;
+  };
+
+  // Returns the results of applying the iteratee to each element of the object
+  // In contrast to _.map it returns an object
+  _.mapObject = function(obj, iteratee, context) {
+    iteratee = cb(iteratee, context);
+    var keys =  _.keys(obj),
+          length = keys.length,
+          results = {},
+          currentKey;
+      for (var index = 0; index < length; index++) {
+        currentKey = keys[index];
+        results[currentKey] = iteratee(obj[currentKey], currentKey, obj);
+      }
+      return results;
+  };
+
+  // Convert an object into a list of `[key, value]` pairs.
+  _.pairs = function(obj) {
+    var keys = _.keys(obj);
+    var length = keys.length;
+    var pairs = Array(length);
+    for (var i = 0; i < length; i++) {
+      pairs[i] = [keys[i], obj[keys[i]]];
+    }
+    return pairs;
+  };
+
+  // Invert the keys and values of an object. The values must be serializable.
+  _.invert = function(obj) {
+    var result = {};
+    var keys = _.keys(obj);
+    for (var i = 0, length = keys.length; i < length; i++) {
+      result[obj[keys[i]]] = keys[i];
+    }
+    return result;
+  };
+
+  // Return a sorted list of the function names available on the object.
+  // Aliased as `methods`
+  _.functions = _.methods = function(obj) {
+    var names = [];
+    for (var key in obj) {
+      if (_.isFunction(obj[key])) names.push(key);
+    }
+    return names.sort();
+  };
+
+  // Extend a given object with all the properties in passed-in object(s).
+  _.extend = createAssigner(_.allKeys);
+
+  // Assigns a given object with all the own properties in the passed-in object(s)
+  // (https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/assign)
+  _.extendOwn = _.assign = createAssigner(_.keys);
+
+  // Returns the first key on an object that passes a predicate test
+  _.findKey = function(obj, predicate, context) {
+    predicate = cb(predicate, context);
+    var keys = _.keys(obj), key;
+    for (var i = 0, length = keys.length; i < length; i++) {
+      key = keys[i];
+      if (predicate(obj[key], key, obj)) return key;
+    }
+  };
+
+  // Return a copy of the object only containing the whitelisted properties.
+  _.pick = function(object, oiteratee, context) {
+    var result = {}, obj = object, iteratee, keys;
+    if (obj == null) return result;
+    if (_.isFunction(oiteratee)) {
+      keys = _.allKeys(obj);
+      iteratee = optimizeCb(oiteratee, context);
+    } else {
+      keys = flatten(arguments, false, false, 1);
+      iteratee = function(value, key, obj) { return key in obj; };
+      obj = Object(obj);
+    }
+    for (var i = 0, length = keys.length; i < length; i++) {
+      var key = keys[i];
+      var value = obj[key];
+      if (iteratee(value, key, obj)) result[key] = value;
+    }
+    return result;
+  };
+
+   // Return a copy of the object without the blacklisted properties.
+  _.omit = function(obj, iteratee, context) {
+    if (_.isFunction(iteratee)) {
+      iteratee = _.negate(iteratee);
+    } else {
+      var keys = _.map(flatten(arguments, false, false, 1), String);
+      iteratee = function(value, key) {
+        return !_.contains(keys, key);
+      };
+    }
+    return _.pick(obj, iteratee, context);
+  };
+
+  // Fill in a given object with default properties.
+  _.defaults = createAssigner(_.allKeys, true);
+
+  // Creates an object that inherits from the given prototype object.
+  // If additional properties are provided then they will be added to the
+  // created object.
+  _.create = function(prototype, props) {
+    var result = baseCreate(prototype);
+    if (props) _.extendOwn(result, props);
+    return result;
+  };
+
+  // Create a (shallow-cloned) duplicate of an object.
+  _.clone = function(obj) {
+    if (!_.isObject(obj)) return obj;
+    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
+  };
+
+  // Invokes interceptor with the obj, and then returns obj.
+  // The primary purpose of this method is to "tap into" a method chain, in
+  // order to perform operations on intermediate results within the chain.
+  _.tap = function(obj, interceptor) {
+    interceptor(obj);
+    return obj;
+  };
+
+  // Returns whether an object has a given set of `key:value` pairs.
+  _.isMatch = function(object, attrs) {
+    var keys = _.keys(attrs), length = keys.length;
+    if (object == null) return !length;
+    var obj = Object(object);
+    for (var i = 0; i < length; i++) {
+      var key = keys[i];
+      if (attrs[key] !== obj[key] || !(key in obj)) return false;
+    }
+    return true;
+  };
+
+
+  // Internal recursive comparison function for `isEqual`.
+  var eq = function(a, b, aStack, bStack) {
+    // Identical objects are equal. `0 === -0`, but they aren't identical.
+    // See the [Harmony `egal` proposal](http://wiki.ecmascript.org/doku.php?id=harmony:egal).
+    if (a === b) return a !== 0 || 1 / a === 1 / b;
+    // A strict comparison is necessary because `null == undefined`.
+    if (a == null || b == null) return a === b;
+    // Unwrap any wrapped objects.
+    if (a instanceof _) a = a._wrapped;
+    if (b instanceof _) b = b._wrapped;
+    // Compare `[[Class]]` names.
+    var className = toString.call(a);
+    if (className !== toString.call(b)) return false;
+    switch (className) {
+      // Strings, numbers, regular expressions, dates, and booleans are compared by value.
+      case '[object RegExp]':
+      // RegExps are coerced to strings for comparison (Note: '' + /a/i === '/a/i')
+      case '[object String]':
+        // Primitives and their corresponding object wrappers are equivalent; thus, `"5"` is
+        // equivalent to `new String("5")`.
+        return '' + a === '' + b;
+      case '[object Number]':
+        // `NaN`s are equivalent, but non-reflexive.
+        // Object(NaN) is equivalent to NaN
+        if (+a !== +a) return +b !== +b;
+        // An `egal` comparison is performed for other numeric values.
+        return +a === 0 ? 1 / +a === 1 / b : +a === +b;
+      case '[object Date]':
+      case '[object Boolean]':
+        // Coerce dates and booleans to numeric primitive values. Dates are compared by their
+        // millisecond representations. Note that invalid dates with millisecond representations
+        // of `NaN` are not equivalent.
+        return +a === +b;
+    }
+
+    var areArrays = className === '[object Array]';
+    if (!areArrays) {
+      if (typeof a != 'object' || typeof b != 'object') return false;
+
+      // Objects with different constructors are not equivalent, but `Object`s or `Array`s
+      // from different frames are.
+      var aCtor = a.constructor, bCtor = b.constructor;
+      if (aCtor !== bCtor && !(_.isFunction(aCtor) && aCtor instanceof aCtor &&
+                               _.isFunction(bCtor) && bCtor instanceof bCtor)
+                          && ('constructor' in a && 'constructor' in b)) {
+        return false;
+      }
+    }
+    // Assume equality for cyclic structures. The algorithm for detecting cyclic
+    // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+
+    // Initializing stack of traversed objects.
+    // It's done here since we only need them for objects and arrays comparison.
+    aStack = aStack || [];
+    bStack = bStack || [];
+    var length = aStack.length;
+    while (length--) {
+      // Linear search. Performance is inversely proportional to the number of
+      // unique nested structures.
+      if (aStack[length] === a) return bStack[length] === b;
+    }
+
+    // Add the first object to the stack of traversed objects.
+    aStack.push(a);
+    bStack.push(b);
+
+    // Recursively compare objects and arrays.
+    if (areArrays) {
+      // Compare array lengths to determine if a deep comparison is necessary.
+      length = a.length;
+      if (length !== b.length) return false;
+      // Deep compare the contents, ignoring non-numeric properties.
+      while (length--) {
+        if (!eq(a[length], b[length], aStack, bStack)) return false;
+      }
+    } else {
+      // Deep compare objects.
+      var keys = _.keys(a), key;
+      length = keys.length;
+      // Ensure that both objects contain the same number of properties before comparing deep equality.
+      if (_.keys(b).length !== length) return false;
+      while (length--) {
+        // Deep compare each member
+        key = keys[length];
+        if (!(_.has(b, key) && eq(a[key], b[key], aStack, bStack))) return false;
+      }
+    }
+    // Remove the first object from the stack of traversed objects.
+    aStack.pop();
+    bStack.pop();
+    return true;
+  };
+
+  // Perform a deep comparison to check if two objects are equal.
+  _.isEqual = function(a, b) {
+    return eq(a, b);
+  };
+
+  // Is a given array, string, or object empty?
+  // An "empty" object has no enumerable own-properties.
+  _.isEmpty = function(obj) {
+    if (obj == null) return true;
+    if (isArrayLike(obj) && (_.isArray(obj) || _.isString(obj) || _.isArguments(obj))) return obj.length === 0;
+    return _.keys(obj).length === 0;
+  };
+
+  // Is a given value a DOM element?
+  _.isElement = function(obj) {
+    return !!(obj && obj.nodeType === 1);
+  };
+
+  // Is a given value an array?
+  // Delegates to ECMA5's native Array.isArray
+  _.isArray = nativeIsArray || function(obj) {
+    return toString.call(obj) === '[object Array]';
+  };
+
+  // Is a given variable an object?
+  _.isObject = function(obj) {
+    var type = typeof obj;
+    return type === 'function' || type === 'object' && !!obj;
+  };
+
+  // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp, isError.
+  _.each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp', 'Error'], function(name) {
+    _['is' + name] = function(obj) {
+      return toString.call(obj) === '[object ' + name + ']';
+    };
+  });
+
+  // Define a fallback version of the method in browsers (ahem, IE < 9), where
+  // there isn't any inspectable "Arguments" type.
+  if (!_.isArguments(arguments)) {
+    _.isArguments = function(obj) {
+      return _.has(obj, 'callee');
+    };
+  }
+
+  // Optimize `isFunction` if appropriate. Work around some typeof bugs in old v8,
+  // IE 11 (#1621), and in Safari 8 (#1929).
+  if (typeof /./ != 'function' && typeof Int8Array != 'object') {
+    _.isFunction = function(obj) {
+      return typeof obj == 'function' || false;
+    };
+  }
+
+  // Is a given object a finite number?
+  _.isFinite = function(obj) {
+    return isFinite(obj) && !isNaN(parseFloat(obj));
+  };
+
+  // Is the given value `NaN`? (NaN is the only number which does not equal itself).
+  _.isNaN = function(obj) {
+    return _.isNumber(obj) && obj !== +obj;
+  };
+
+  // Is a given value a boolean?
+  _.isBoolean = function(obj) {
+    return obj === true || obj === false || toString.call(obj) === '[object Boolean]';
+  };
+
+  // Is a given value equal to null?
+  _.isNull = function(obj) {
+    return obj === null;
+  };
+
+  // Is a given variable undefined?
+  _.isUndefined = function(obj) {
+    return obj === void 0;
+  };
+
+  // Shortcut function for checking if an object has a given property directly
+  // on itself (in other words, not on a prototype).
+  _.has = function(obj, key) {
+    return obj != null && hasOwnProperty.call(obj, key);
+  };
+
+  // Utility Functions
+  // -----------------
+
+  // Run Underscore.js in *noConflict* mode, returning the `_` variable to its
+  // previous owner. Returns a reference to the Underscore object.
+  _.noConflict = function() {
+    root._ = previousUnderscore;
+    return this;
+  };
+
+  // Keep the identity function around for default iteratees.
+  _.identity = function(value) {
+    return value;
+  };
+
+  // Predicate-generating functions. Often useful outside of Underscore.
+  _.constant = function(value) {
+    return function() {
+      return value;
+    };
+  };
+
+  _.noop = function(){};
+
+  _.property = property;
+
+  // Generates a function for a given object that returns a given property.
+  _.propertyOf = function(obj) {
+    return obj == null ? function(){} : function(key) {
+      return obj[key];
+    };
+  };
+
+  // Returns a predicate for checking whether an object has a given set of
+  // `key:value` pairs.
+  _.matcher = _.matches = function(attrs) {
+    attrs = _.extendOwn({}, attrs);
+    return function(obj) {
+      return _.isMatch(obj, attrs);
+    };
+  };
+
+  // Run a function **n** times.
+  _.times = function(n, iteratee, context) {
+    var accum = Array(Math.max(0, n));
+    iteratee = optimizeCb(iteratee, context, 1);
+    for (var i = 0; i < n; i++) accum[i] = iteratee(i);
+    return accum;
+  };
+
+  // Return a random integer between min and max (inclusive).
+  _.random = function(min, max) {
+    if (max == null) {
+      max = min;
+      min = 0;
+    }
+    return min + Math.floor(Math.random() * (max - min + 1));
+  };
+
+  // A (possibly faster) way to get the current timestamp as an integer.
+  _.now = Date.now || function() {
+    return new Date().getTime();
+  };
+
+   // List of HTML entities for escaping.
+  var escapeMap = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '`': '&#x60;'
+  };
+  var unescapeMap = _.invert(escapeMap);
+
+  // Functions for escaping and unescaping strings to/from HTML interpolation.
+  var createEscaper = function(map) {
+    var escaper = function(match) {
+      return map[match];
+    };
+    // Regexes for identifying a key that needs to be escaped
+    var source = '(?:' + _.keys(map).join('|') + ')';
+    var testRegexp = RegExp(source);
+    var replaceRegexp = RegExp(source, 'g');
+    return function(string) {
+      string = string == null ? '' : '' + string;
+      return testRegexp.test(string) ? string.replace(replaceRegexp, escaper) : string;
+    };
+  };
+  _.escape = createEscaper(escapeMap);
+  _.unescape = createEscaper(unescapeMap);
+
+  // If the value of the named `property` is a function then invoke it with the
+  // `object` as context; otherwise, return it.
+  _.result = function(object, property, fallback) {
+    var value = object == null ? void 0 : object[property];
+    if (value === void 0) {
+      value = fallback;
+    }
+    return _.isFunction(value) ? value.call(object) : value;
+  };
+
+  // Generate a unique integer id (unique within the entire client session).
+  // Useful for temporary DOM ids.
+  var idCounter = 0;
+  _.uniqueId = function(prefix) {
+    var id = ++idCounter + '';
+    return prefix ? prefix + id : id;
+  };
+
+  // By default, Underscore uses ERB-style template delimiters, change the
+  // following template settings to use alternative delimiters.
+  _.templateSettings = {
+    evaluate    : /<%([\s\S]+?)%>/g,
+    interpolate : /<%=([\s\S]+?)%>/g,
+    escape      : /<%-([\s\S]+?)%>/g
+  };
+
+  // When customizing `templateSettings`, if you don't want to define an
+  // interpolation, evaluation or escaping regex, we need one that is
+  // guaranteed not to match.
+  var noMatch = /(.)^/;
+
+  // Certain characters need to be escaped so that they can be put into a
+  // string literal.
+  var escapes = {
+    "'":      "'",
+    '\\':     '\\',
+    '\r':     'r',
+    '\n':     'n',
+    '\u2028': 'u2028',
+    '\u2029': 'u2029'
+  };
+
+  var escaper = /\\|'|\r|\n|\u2028|\u2029/g;
+
+  var escapeChar = function(match) {
+    return '\\' + escapes[match];
+  };
+
+  // JavaScript micro-templating, similar to John Resig's implementation.
+  // Underscore templating handles arbitrary delimiters, preserves whitespace,
+  // and correctly escapes quotes within interpolated code.
+  // NB: `oldSettings` only exists for backwards compatibility.
+  _.template = function(text, settings, oldSettings) {
+    if (!settings && oldSettings) settings = oldSettings;
+    settings = _.defaults({}, settings, _.templateSettings);
+
+    // Combine delimiters into one regular expression via alternation.
+    var matcher = RegExp([
+      (settings.escape || noMatch).source,
+      (settings.interpolate || noMatch).source,
+      (settings.evaluate || noMatch).source
+    ].join('|') + '|$', 'g');
+
+    // Compile the template source, escaping string literals appropriately.
+    var index = 0;
+    var source = "__p+='";
+    text.replace(matcher, function(match, escape, interpolate, evaluate, offset) {
+      source += text.slice(index, offset).replace(escaper, escapeChar);
+      index = offset + match.length;
+
+      if (escape) {
+        source += "'+\n((__t=(" + escape + "))==null?'':_.escape(__t))+\n'";
+      } else if (interpolate) {
+        source += "'+\n((__t=(" + interpolate + "))==null?'':__t)+\n'";
+      } else if (evaluate) {
+        source += "';\n" + evaluate + "\n__p+='";
+      }
+
+      // Adobe VMs need the match returned to produce the correct offest.
+      return match;
+    });
+    source += "';\n";
+
+    // If a variable is not specified, place data values in local scope.
+    if (!settings.variable) source = 'with(obj||{}){\n' + source + '}\n';
+
+    source = "var __t,__p='',__j=Array.prototype.join," +
+      "print=function(){__p+=__j.call(arguments,'');};\n" +
+      source + 'return __p;\n';
+
+    try {
+      var render = new Function(settings.variable || 'obj', '_', source);
+    } catch (e) {
+      e.source = source;
+      throw e;
+    }
+
+    var template = function(data) {
+      return render.call(this, data, _);
+    };
+
+    // Provide the compiled source as a convenience for precompilation.
+    var argument = settings.variable || 'obj';
+    template.source = 'function(' + argument + '){\n' + source + '}';
+
+    return template;
+  };
+
+  // Add a "chain" function. Start chaining a wrapped Underscore object.
+  _.chain = function(obj) {
+    var instance = _(obj);
+    instance._chain = true;
+    return instance;
+  };
+
+  // OOP
+  // ---------------
+  // If Underscore is called as a function, it returns a wrapped object that
+  // can be used OO-style. This wrapper holds altered versions of all the
+  // underscore functions. Wrapped objects may be chained.
+
+  // Helper function to continue chaining intermediate results.
+  var result = function(instance, obj) {
+    return instance._chain ? _(obj).chain() : obj;
+  };
+
+  // Add your own custom functions to the Underscore object.
+  _.mixin = function(obj) {
+    _.each(_.functions(obj), function(name) {
+      var func = _[name] = obj[name];
+      _.prototype[name] = function() {
+        var args = [this._wrapped];
+        push.apply(args, arguments);
+        return result(this, func.apply(_, args));
+      };
+    });
+  };
+
+  // Add all of the Underscore functions to the wrapper object.
+  _.mixin(_);
+
+  // Add all mutator Array functions to the wrapper.
+  _.each(['pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift'], function(name) {
+    var method = ArrayProto[name];
+    _.prototype[name] = function() {
+      var obj = this._wrapped;
+      method.apply(obj, arguments);
+      if ((name === 'shift' || name === 'splice') && obj.length === 0) delete obj[0];
+      return result(this, obj);
+    };
+  });
+
+  // Add all accessor Array functions to the wrapper.
+  _.each(['concat', 'join', 'slice'], function(name) {
+    var method = ArrayProto[name];
+    _.prototype[name] = function() {
+      return result(this, method.apply(this._wrapped, arguments));
+    };
+  });
+
+  // Extracts the result from a wrapped and chained object.
+  _.prototype.value = function() {
+    return this._wrapped;
+  };
+
+  // Provide unwrapping proxy for some methods used in engine operations
+  // such as arithmetic and JSON stringification.
+  _.prototype.valueOf = _.prototype.toJSON = _.prototype.value;
+
+  _.prototype.toString = function() {
+    return '' + this._wrapped;
+  };
+
+  // AMD registration happens at the end for compatibility with AMD loaders
+  // that may not enforce next-turn semantics on modules. Even though general
+  // practice for AMD registration is to be anonymous, underscore registers
+  // as a named module because, like jQuery, it is a base library that is
+  // popular enough to be bundled in a third party lib, but not be part of
+  // an AMD load request. Those cases could generate an error when an
+  // anonymous define() is called outside of a loader request.
+  if (true) {
+    !(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_RESULT__ = function() {
+      return _;
+    }.apply(exports, __WEBPACK_AMD_DEFINE_ARRAY__),
+				__WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
+  }
+}.call(this));
 
 
 /***/ }),
-/* 28 */
+/* 32 */
 /***/ (function(module, exports, __webpack_require__) {
 
-"use strict";
+var 			_ = __webpack_require__(31);
+var gimage 		= __webpack_require__(33).charts;
 
-
-function hann (i,N) {
-  return 0.5*(1 - Math.cos(6.283185307179586*i/(N-1)))
+var timeseries = function(data, options) {
+	/*
+		Data Format:
+		[
+			[Date Object, value],
+			[Date Object, value]
+		]
+	*/
+	this.options 	= _.extend({
+		
+	}, options);
+	
+	this.data 		= data;
+	this.original	= data.slice(0);
+	this.buffer 	= [];
+	this.saved 		= [];
+	
+	return this;
 }
 
-module.exports = hann
 
-
-/***/ }),
-/* 29 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-function unique_pred(list, compare) {
-  var ptr = 1
-    , len = list.length
-    , a=list[0], b=list[0]
-  for(var i=1; i<len; ++i) {
-    b = a
-    a = list[i]
-    if(compare(a, b)) {
-      if(i === ptr) {
-        ptr++
-        continue
-      }
-      list[ptr++] = a
-    }
-  }
-  list.length = ptr
-  return list
+// Output the data
+timeseries.prototype.output = function() {
+	return this.data;
 }
 
-function unique_eq(list) {
-  var ptr = 1
-    , len = list.length
-    , a=list[0], b = list[0]
-  for(var i=1; i<len; ++i, b=a) {
-    b = a
-    a = list[i]
-    if(a !== b) {
-      if(i === ptr) {
-        ptr++
-        continue
-      }
-      list[ptr++] = a
-    }
-  }
-  list.length = ptr
-  return list
-}
 
-function unique(list, compare, sorted) {
-  if(list.length === 0) {
-    return list
-  }
-  if(compare) {
-    if(!sorted) {
-      list.sort(compare)
-    }
-    return unique_pred(list, compare)
-  }
-  if(!sorted) {
-    list.sort()
-  }
-  return unique_eq(list)
-}
-
-module.exports = unique
-
-
-/***/ }),
-/* 30 */
-/***/ (function(module, exports, __webpack_require__) {
-
-const PitchAnalyzer = __webpack_require__(11);
-const context = new (window.AudioContext || window.webkitAudioContext)();
-const detectPitch = __webpack_require__(10);
-
-const autocorrelation = __webpack_require__(9).autocorrelation;
-
-
-console.log(PitchAnalyzer);
-
-let pitch = new PitchAnalyzer(44100); 
-let sourceNode;
-var audioBuffer;
-var javascriptNode;
-var acf;
-
-
-// loadSound("sandwich.mp3");
-function setupAudioNodes() {
-
-    javascriptNode = context.createScriptProcessor(2048, 1, 1);
-
-    javascriptNode.connect(context.destination);
-
-}
-setupAudioNodes();
-
-// javascriptNode.onaudioprocess = function () {
-//     // get the average for the first channel
-//     var array = new Float32Array(analyser.frequencyBinCount);
-//     analyser.getFloatFrequencyData(array);
-//     console.log("sourceNode", sourceNode.buffer);
-//     var data = sourceNode.buffer.getChannelData(0);
-//     /* Create a new pitch detector */
-//     var pitchOne = new PitchAnalyzer(44100);
-//     console.log("data", data);
-//     /* Copy samples to the internal buffer */
-//     // pitchOne.input(sourceNode.buffer.getChannelData(0).slice(1000,10000));
-//     var n = 1001;
-//     var i = 1;
-//     while (n < data.length && i < 50000) {
-//         pitchOne.input(data.slice(n-1000, n));
-//         /* Process the current input in the internal buffer */
-//         pitchOne.process();
-//         console.log("pitchOne instance", pitchOne);
-//         var toneOne = pitchOne.findTone();
-//         if (toneOne === null) {
-//             console.log('No tone found!');
-//         } else {
-//             console.log('Found a toneOne, frequency:', toneOne.freq, 'volume:', toneOne.db);
-//         }
-//         n = n+1000;
-//         i++;
-//     }
-// }
-
-
-function getData() {
-	sourceNode = context.createBufferSource();
-
-	let promise = new Promise(function(resolve, reject) {
-
-		var request = new XMLHttpRequest();
-
-		request.open('GET', 'marcCow.wav', true);
-
-		request.responseType = 'arraybuffer';
-
-		request.onload = function() {
-			var audioData = request.response;
-
-			context.decodeAudioData(audioData, function(buffer) {
-				sourceNode.buffer = buffer;
-				// console.log('SOURECE NODE', sourceNode);
-
-				// sourceNode.connect(context.destination);
-				console.log('before resolve')
-				resolve(sourceNode);
-				// console.log('after resolve');
-			},
-
-			function(e) { 
-				// console.log('error' + e.err); 
-				reject();
-			});
-		}
-		// console.log('end', request);
-		request.send();
+// Save the data
+timeseries.prototype.save = function(name, options) {
+	options = _.extend({
+		color:	'AUTO'
+	}, options);
+	
+	this.saved.push({
+		name:	name,
+		color:	options.color,
+		data:	this.data.slice(0)
 	});
+	return this;
+}
 
-	promise.then(sourceNode => {
-		audioBuffer = sourceNode.buffer.getChannelData(0);
-		// console.log('in the promise chain: ', audioBuffer);
+// Chart the data
+timeseries.prototype.chart = function(options) {
+	
+	options = _.extend({
+		main:		false,
+		width:		800,
+		height:		200,
+		bands:		[],
+		lines:		[],
+		points:		[]
+	}, options);
+	
+	// Google Chart
+	var chart = new gimage.line({
+		width:	options.width,
+		height:	options.height,
+		bands:	options.bands,
+		hlines:	options.lines,
+		points:	options.points,
+		autoscale:	true
+	});
+	chart.fromTimeseries(this.data);
+	// Include the original data
+	if (options.main) {
+		chart.fromTimeseries(this.original);
+	}
+	
+	// Include saved data
+	_.each(this.saved, function(saved) {
+		chart.fromTimeseries(saved.data);
+	});
+	
+	return chart.render();
+}
 
-		let increment = audioBuffer.length / 4096; 
 
-		let n = increment + 1;
+// Basic utilities: Array fill, data cloning...
+// Returns an array filled with the specified value.
+timeseries.prototype.fill = function(value, n) {
+	var array = [];
+	var i;
+	for (i=0;i<n;i++) {
+		array.push(value);
+	}
+	return array;
+}
 
-		let semiresult = [];
-		let abbreviated = ['abbreviated:'];
+// Returns a clone of the data
+timeseries.prototype.clone = function() {
+	var buffer = _.map(this.data, function(point) {
+		return [
+			point[0],
+			point[1]*1
+		];
+	});
+	return buffer;
+}
 
-		while (n < audioBuffer.length) {
-			let testBuffer = audioBuffer.slice(n - increment, n);
-			pitch.input(testBuffer);
-			pitch.process();
+// Reset the data to its original dataset
+timeseries.prototype.reset = function() {
+	this.data = this.original;
+	return this;
+}
 
-			var tone = pitch.findTone();
-			semiresult.push(tone);
+// Convert the data to a 1D array
+timeseries.prototype.toArray = function() {
+	return _.map(this.data, function(datapoint) {
+		return  datapoint[1];
+	});
+}
 
-			if (tone !== abbreviated[abbreviated.length - 1]) {
-				abbreviated.push(tone)
-			}
-			n += increment;
+// Stats: Min, Max, Mean, Stdev
+timeseries.prototype.min = function() {
+	var array = this.toArray();
+	return _.min(array);
+}
+timeseries.prototype.max = function() {
+	var array = this.toArray();
+	return _.max(array);
+}
+timeseries.prototype.mean = function(data) {
+	if (!data) {
+		var data = this.data;
+	}
+	var sum 	= 0;
+	var n 		= 0;
+	_.each(data, function(datapoint) {
+		sum += datapoint[1];
+		n++;
+	});
+	return sum/n;
+}
+timeseries.prototype.stdev = function(data) {
+	if (!data) {
+		var data = this.data;
+	}
+	var sum 	= 0;
+	var n 		= 0;
+	var mean 	= this.mean();
+	_.each(data, function(datapoint) {
+		sum += (datapoint[1]-mean)*(datapoint[1]-mean);
+		n++;
+	});
+	return Math.sqrt(sum/n);
+}
+
+
+// Offet the data
+timeseries.prototype.offset = function(value, data, ret) {
+	if (!data) {
+		var data = this.data;
+	}
+	var i;
+	var j;
+	var l 	= data.length;
+	var sum	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= data.slice(0);
+	
+	for (i=0;i<l;i++) {
+		this.buffer[i] = [
+			this.buffer[i][0],
+			this.buffer[i][1]+value
+		];
+	}
+	if (!ret) {
+		this.data = this.buffer;
+		return this;
+	} else {
+		return this.buffer;
+	}
+}
+
+
+
+
+
+// Moving Average
+timeseries.prototype.ma = function(options) {
+	options = _.extend({
+		period:		12
+	}, options);
+	var i;
+	var j;
+	var l 	= this.data.length;
+	var sum	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= [];
+	
+	// Leave the datapoints [0;period[ intact
+	this.buffer = this.data.slice(0, options.period);
+	
+	for (i=options.period;i<l;i++) {
+		sum	= 0;
+		for (j=options.period;j>0;j--) {
+			sum += this.data[i-j][1];
 		}
+		this.buffer[i] = [this.data[i][0], sum/options.period];
+	}
+	this.data = this.buffer;
+	return this;
+}
+timeseries.prototype.ema = function(options) {
+	options = _.extend({
+		period:		12
+	}, options);
+	var i;
+	var j;
+	var l 	= this.data.length;
+	var sum	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= [];
+	
+	// Leave the datapoints [0;period[ intact
+	this.buffer = this.data.slice(0, options.period);
+	
+	var m	= 2/(options.period+1);	// Multiplier
+	
+	for (i=options.period;i<l;i++) {
+		this.buffer[i] = [
+			this.data[i][0],
+			(this.data[i][1]-this.data[i-1][1])*m+this.data[i-1][1]
+		];
+	}
+	this.data = this.buffer;
+	return this;
+}
+timeseries.prototype.lwma = function(options) {
+	options = _.extend({
+		period:		12
+	}, options);
+	var i;
+	var j;
+	var l 	= this.data.length;
+	var sum	= 0;
+	var n	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= [];
+	
+	// Leave the datapoints [0;period[ intact
+	this.buffer = this.data.slice(0, options.period);
+	
+	for (i=options.period;i<l;i++) {
+		sum	= 0;
+		n	= 0;
+		for (j=options.period;j>0;j--) {
+			sum += this.data[i-j][1]*j;
+			n += j;
+		}
+		this.buffer[i] = [this.data[i][0], sum/n];
+	}
+	this.data = this.buffer;
+	return this;
+}
 
 
-		let unique = abbreviated.filter(elem => {
-			if (elem !== null) return elem
+
+// DSL, iTrend
+timeseries.prototype.dsp_itrend = function(options) {
+	// By Ehler
+	// http://www.davenewberg.com/Trading/TS_Code/Ehlers_Indicators/iTrend_Ind.html
+	options = _.extend({
+		alpha:		0.7,
+		use:		'main'
+	}, options);
+	var i;
+	var j;
+	var l 	= this.data.length;
+	
+	var trigger 	= [];
+	
+	// Reset the buffer
+	this.buffer 	= [];
+	
+	// Leave the datapoints [0;period[ intact
+	this.buffer 	= this.data.slice(0, 3);
+	this.trigger 	= this.data.slice(0, 3);
+	
+	for (i=3;i<l;i++) {
+		this.buffer[i] = [
+			this.data[i][0],
+			(options.alpha-(options.alpha*options.alpha)/4)*this.data[i][1] + (0.5*(options.alpha*options.alpha)*this.data[i-1][1]) - (options.alpha - 0.75*(options.alpha*options.alpha)) * this.data[i-2][1] + 2*(1-options.alpha)*this.buffer[i-1][1] - (1-options.alpha)*(1-options.alpha)*this.buffer[i-2][1]
+		];
+		this.trigger[i] = [
+			this.data[i][0],
+			2*this.buffer[i][1]-this.buffer[i-2][1]
+		]
+	}
+	if (options.use == 'trigger') {
+		this.data = this.trigger;
+	} else{
+		this.data = this.buffer;
+	}
+	
+	return this;
+}
+
+
+// Pixelize - Domain reduction
+timeseries.prototype.pixelize = function(options) {
+	options = _.extend({
+		grid:		20
+	}, options);
+	
+	// Calculate the grid values
+	var min 	= this.min();
+	var max 	= this.max();
+	var tile	= (max-min)/options.grid;
+	
+	this.buffer	= _.map(this.data, function(datapoint) {
+		datapoint[1] = Math.round(datapoint[1]/tile)*tile;
+		return datapoint;
+	});
+	this.data = this.buffer;
+	return this;
+}
+
+
+// Iterative Noise Removal
+timeseries.prototype.smoother = function(options) {
+	options = _.extend({
+		period:		1
+	}, options);
+	var i;
+	var j;
+	var l 	= this.data.length;
+	var sum	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= this.data.slice(0);
+	
+	for (j=0;j<options.period;j++) {
+		for (i=3;i<l;i++) {
+			this.buffer[i-1] = [
+				this.buffer[i-1][0],
+				(this.buffer[i-2][1]+this.buffer[i][1])/2
+			];
+		}
+	}
+	this.data = this.buffer;
+	return this;
+}
+
+
+// Extract the noise out of the data
+timeseries.prototype.noiseData = function() {
+	var i;
+	var j;
+	var l 	= this.data.length;
+	var sum	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= [];
+	
+	for (i=0;i<l;i++) {
+		this.buffer[i] = [
+			this.data[i][0],
+			this.original[i][1]-this.data[i][1]
+		];
+	}
+	this.data = this.buffer;
+	return this;
+}
+
+
+// Oscillator function
+timeseries.prototype.osc = function() {
+	var i;
+	var j;
+	var l 	= this.data.length;
+	var sum	= 0;
+	
+	// Reset the buffer
+	this.buffer 	= [];
+	
+	for (i=0;i<l;i++) {
+		if (i<=1) {
+			this.buffer[i] = [
+				this.data[i][0],
+				0
+			];
+		} else {
+			this.buffer[i] = [
+				this.data[i][0],
+				this.data[i][1]-this.data[i-1][1]
+			];
+		}
+	}
+	this.data = this.buffer;
+	return this;
+}
+
+
+
+// Find the supports and resistances. Wrong algorithm.
+timeseries.prototype.supports = function(options) {
+	options = _.extend({
+		grid:		40,
+		threshold:	10
+	}, options);
+	
+	// Calculate the grid values
+	var min 	= this.min();
+	var max 	= this.max();
+	var tile	= (max-min)/options.grid;
+	
+	var prices = {
+		
+	};
+	
+	_.each(this.data, function(datapoint) {
+		var val = Math.round(datapoint[1]/tile)*tile;
+		if (!prices[val]) {
+			prices[val] = 0;
+		}
+		prices[val]++;
+	});
+	
+	var ordered = [];
+	var i;
+	for (i in prices) {
+		ordered.push({
+			price:	i,
+			count:	prices[i]
 		});
-
-		// console.log('the result: ',semiresult);
-		console.log('an abbreviated set: ',abbreviated);
-		console.log('unique results: ',unique)
-
-
-		let roundDown = unique.map(num => Math.floor(num));
-
-		// DO AUTOCORRELATE ON ROUNDOWN
-
-		console.log(roundDown.join(' '));
-
-		console.log(semiresult.map(num => Math.floor(num)).join(' '));
-
-		let result = semiresult.map(num => Math.floor(num));
-
-		acf = autocorrelation(result)
-		console.log('autocorrelated', acf)
-
-		let graphThis = acf.map(num => Math.floor(num * 100)).join(' ');
-
-		console.log(graphThis);
+	}
+	ordered = ordered.sort(function(a,b) {
+		return b.count-a.count;
+	});
+	ordered	= _.filter(ordered, function(support) {
+		return support.count >= options.threshold;
+	});
+	if (options.stats) {
+		return 	ordered;
+	}
+	
+	return _.map(ordered, function(support) {
+		return support.price;
+	});
+}
 
 
+// Standardize the data
+timeseries.prototype.standardize = function(options) {
+	options = _.extend({}, options);
+	
+	var stdev	= this.stdev();
+	var mean	= this.mean();
+	
+	this.data = _.map(this.data, function(datapoint) {
+		datapoint[1] = (datapoint[1]-mean)/stdev;
+		return datapoint;
+	});
+	
+	return this;
+}
+
+
+// Slice the data
+timeseries.prototype.slice = function(from, to) {
+	if (!from) {
+		from = 0;
+	}
+	if (!to) {
+		to = this.data.length-1;
+	}
+	
+	this.data = this.data.splice(from, to)
+	
+	return this;
+}
+
+
+// Find the cycle in the data
+timeseries.prototype.cycle = function(options) {
+	options = _.extend({
+		period:		10,
+		forecast:	false,
+		forecast_length:	20
+	}, options);
+	
+	// Smooth the data
+	this.smoother(options);
+	
+	
+	
+	// Copy the data
+	var buffer 				= [];
+	var buffer_forecast 	= [];
+	
+	var i;
+	var j;
+	var l = this.data.length;
+	for (i=0;i<2;i++) {
+		buffer[i] = ([
+			this.data[i][0],
+			this.data[i][1]
+		]);
+		buffer_forecast[i] = ([
+			this.data[i][0],
+			this.data[i][1]
+		]);
+	}
+	for (i=2;i<l;i++) {
+		// We find the ratio
+		var d1 		= this.data[i][1]-this.data[i-1][1];
+		var d2 		= this.data[i][1]-this.data[i-2][1];
+		var ratio	= d1/d2;
+		console.log("ratio",ratio, d1, d2);
+		buffer[i] = ([
+			this.data[i][0],
+			this.data[i][1]
+		]);
+		
+		buffer_forecast[i] = ([
+			this.data[i][0],
+			this.data[i][1],
+			ratio,
+			d1>0,
+			d2>0
+		]);
+		
+	}
+	
+	if (options.forecast) {
+		for (i=2;i<l;i++) {
+			if (options.forecast == i) {
+				
+				// Generate a two cycles sin wave
+				var sin = [];
+				for (j=0;j<720;j++) {
+					sin.push(Math.sin(j*Math.PI/180));
+				}
+				console.log("sin",sin);
+				
+				// Find the closest sin wave
+				var MSE = [];
+				var minMSE	= 10000000;
+				var pos;
+				for (j=2;j<720;j++) {
+					var d1 		= sin[j]-sin[j-1];
+					var d2 		= sin[j]-sin[j-2];
+					var ratio	= d1/d2;
+					var mse		= (ratio-buffer_forecast[i][2])*(ratio-buffer_forecast[i][2]);
+					if (mse <= minMSE && ((d1>0)==buffer_forecast[i][3]) && ((d2>0)==buffer_forecast[i][3])) {
+						minMSE 	= mse;
+						pos		= j;
+					}
+				}
+				console.log("minMSE",minMSE, pos);
+				
+				for (j=0;j<=options.forecast_length;j++) {
+					buffer_forecast[i+j][1] = Math.sin((pos+j)*Math.PI/180);
+					
+					//buffer_forecast[i+j][1] = sin[pos+j];
+					
+					console.log("buffer_forecast["+(i+j)+"]", pos+j, buffer_forecast[i+j][1]);
+				}
+				
+				break;
+			}
+		}
+		this.data = buffer_forecast;
+	} else {
+		this.data = buffer;
+	}
+	
+	return this;
+}
+
+
+// Get the outliers from the dataset
+timeseries.prototype.outliers = function(options) {
+	// Original code by Professor Hossein Arsham - http://home.ubalt.edu/ntsbarsh/Business-stat/otherapplets/Outlier.htm
+	// Re-written for timeseries-analysis.
+	
+	options = _.extend({
+		threshold:	2.5
+	}, options);
+	
+	
+	// Create a copy of the data;
+	this.buffer 	= this.data.slice(0);
+	
+	// standardize the data
+	this.standardize();
+	
+	var outliers = [];
+	
+	_.each(this.data, function(datapoint) {
+		if (Math.abs(datapoint[1]) > options.threshold) {
+			outliers.push(datapoint);
+		}
+	});
+	
+	// restore the data
+	this.data = this.buffer.slice(0);
+	delete this.buffer;
+	
+	return outliers;
+}
+
+
+/* EXPERIMENTAL - AutoRegression Analysis */
+
+timeseries.prototype.regression_forecast = function(options) {
+	options = _.extend({
+		method:		'ARMaxEntropy',	// ARMaxEntropy | ARLeastSquare
+		sample:		50,		// points int he sample
+		start:		100,	// Where to start
+		n:			5,		// How many points to forecast
+		degree:		5
+	},options);
+	
+	var i;
+	var j;
+	var l = this.data.length;
+	
+	var mean	= this.mean();
+	this.offset(-mean);
+	var backup 	= this.clone();
+	var buffer 	= this.clone();
+	
+	var sample 		= buffer.slice(options.start-1-options.sample, options.start);
+	
+	// The current data to process is only a sample of the real data.
+	this.data		= sample;
+	// Get the AR coeffs
+	var coeffs 		= this[options.method]({degree: options.degree});
+	console.log("coeffs",coeffs);
+	
+	for (i=options.start;i<options.start+options.n;i++) {
+		buffer[i][1]	= 0;
+		for (j=0;j<coeffs.length;j++) {
+			if (options.method == 'ARMaxEntropy') {
+				buffer[i][1] -= buffer[i-1-j][1]*coeffs[j];
+			} else {
+				buffer[i][1] += buffer[i-1-j][1]*coeffs[j];
+			}
+		}
+		console.log("buffer["+i+"][1]",buffer[i][1]);
+	}
+	this.data = buffer;
+	this.offset(mean);
+	
+	return this;
+}
+
+timeseries.prototype.regression_forecast_optimize = function(options) {
+	options = _.extend({
+		data:		this.data,
+		maxPct:		0.2,
+		maxSampleSize:	false
+	},options);
+	
+	var l 				= options.data.length;
+	
+	var maxSampleSize	= Math.round(l*options.maxPct);
+	if (options.maxSampleSize) {
+		maxSampleSize = Math.min(maxSampleSize, options.maxSampleSize);
+	}
+	
+	var maxDegree		= Math.round(maxSampleSize);
+	var methods			= ['ARMaxEntropy', 'ARLeastSquare'];
+	var ss;		// sample size
+	var deg;	// degree
+	var MSEData = [];
+	var i;
+	for (i=0;i<methods.length;i++) {
+		for (ss=3;ss<=maxSampleSize;ss++) {
+			for (deg=1;deg<=maxDegree;deg++) {
+				if (deg<=ss) {
+					var mse = this.regression_forecast_mse({
+						method:	methods[i],
+						sample:	ss,
+						degree:	deg,
+						data:	options.data
+					});
+					console.log("Trying method("+methods[i]+") degree("+deg+") sample("+ss+")\t"+mse);
+					if (!isNaN(mse)) {
+						MSEData.push({
+							MSE:	mse,
+							method:	methods[i],
+							degree:	deg,
+							sample:	ss
+						});
+					}
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	
+	// Now we sort by MSE
+	MSEData = MSEData.sort(function(a,b) {
+		return a.MSE>b.MSE;
+	});
+	
+	console.log("Best Settings: ",MSEData[0]);
+	
+	// Return the best settings
+	return MSEData[0];
+	
+}
+// Calculate the MSE for a forecast, for a set of parameters
+timeseries.prototype.regression_forecast_mse = function(options) {
+	options = _.extend({
+		method:		'ARMaxEntropy',	// ARMaxEntropy | ARLeastSquare
+		sample:		50,
+		degree:		5,
+		data:		this.data
+	},options);
+	
+	
+	var i;
+	var j;
+	var l 			= options.data.length;
+	
+	var mean		= this.mean(options.data);
+	options.data 	= this.offset(-mean, options.data, true);
+	
+	var backup 		= _.map(options.data, function(item) {
+		return [
+			item[0],
+			item[1]*1
+		];
+	});
+	var buffer 		= _.map(options.data, function(item) {
+		return [
+			item[0],
+			item[1]*1
+		];
+	});
+	
+	var MSE	= 0;
+	var n = 0;
+	for (i=options.sample;i<l-1;i++) {
+		var sample 		= buffer.slice(i-options.sample, i);
+		// Get the AR coeffs
+		var coeffs 		= this[options.method]({degree:options.degree, data:sample});
+		var knownValue 	= buffer[i+1][1]*1;
+		buffer[i+1][1]	= 0;
+		for (j=0;j<coeffs.length;j++) {
+			if (options.method == 'ARMaxEntropy') {
+				buffer[i+1][1] -= backup[i-j][1]*coeffs[j];
+			} else {
+				buffer[i+1][1] += backup[i-j][1]*coeffs[j];
+			}
+		}
+		
+		MSE += (knownValue-buffer[i+1][1])*(knownValue-buffer[i+1][1]);
+		n++;
+	}
+	
+	MSE /= n;
+	
+	
+	//this.data = buffer;
+	
+	// Put back the mean
+	//this.offset(mean);
+	
+	return MSE;
+}
+timeseries.prototype.sliding_regression_forecast = function(options) {
+	options = _.extend({
+		method:		'ARMaxEntropy',	// ARMaxEntropy | ARLeastSquare
+		sample:		50,
+		degree:		5
+	},options);
+	
+	var i;
+	var j;
+	var l = this.data.length;
+	
+	var mean	= this.mean();
+	this.offset(-mean);
+	var backup 	= this.clone();
+	var buffer 	= this.clone();
+	
+	for (i=options.sample;i<l-1;i++) {
+		var sample 		= buffer.slice(i-options.sample, i);
+		// The current data to process is only a sample of the real data.
+		this.data		= sample;
+		// Get the AR coeffs
+		var coeffs 		= this[options.method]({degree:options.degree});
+		buffer[i+1][1]	= 0; //backup[i][1]*1;
+		for (j=0;j<coeffs.length;j++) {
+			if (options.method == 'ARMaxEntropy') {
+				buffer[i+1][1] -= backup[i-j][1]*coeffs[j];
+			} else {
+				buffer[i+1][1] += backup[i-j][1]*coeffs[j];
+			}
+		}
+		//buffer[i+1][1] -
+	}
+	
+	this.data = buffer;
+	
+	// Put back the mean
+	this.offset(mean);
+	
+	return this;
+}
+
+
+
+// Autoregression method: MaxEntropy
+timeseries.prototype.ARMaxEntropy = function(options) {
+	// Credits to Alex Sergejew, Nick Hawthorn, Rainer Hegger (1998)
+	// Zero-Indexed arrays modification by Paul Sanders (the arrays were One-indexed, FORTRAN style)
+	// Ported to Javascript by Julien Loutre for timeseries-analysis, from Paul Bourke's C code.
+	
+	options = _.extend({
+		degree:			5,
+		data:			this.data,
+		intermediates:	false	// Generates and returns the intermediates, a 2D array, instead of the coefficients.
+	}, options);
+	
+	var scope	= this;
+	var i;
+	var length 	= options.data.length;
+	var pef 	= this.fill(0, length);
+	var per 	= this.fill(0, length);
+	var ar 		= this.fill([], options.degree+1);
+	ar			= _.map(ar, function(d1) {
+		return scope.fill(0, options.degree+1);
+	});
+	var h 		= this.fill(0, length);
+	var g		= this.fill(0, options.degree+2);
+	
+	var t1, t2;
+	var n;
+	
+	var coef	= [];
+	
+	for (n=1; n <= options.degree; n++)
+	{
+		var sn = 0.0;
+		var sd = 0.0;
+		var j;
+		var jj = length - n;
+	
+		for (j = 0; j < jj; j++)
+		{
+			t1 = options.data[j + n][1] + pef[j];
+			t2 = options.data[j][1] + per[j];
+			sn -= 2.0 * t1 * t2;
+			sd += (t1 * t1) + (t2 * t2);
+		}
+	
+		t1 = g[n] = sn / sd;
+		if (n != 1)
+		{
+			for (j = 1; j < n; j++) {
+				h[j] = g[j] + t1 * g[n - j];
+			}
+			for (j = 1; j < n; j++) {
+				g[j] = h[j];
+			}
+			jj--;
+		}
+	
+		for (j = 0; j < jj; j++)
+		{
+			per [j] += t1 * pef[j] + t1 * options.data[j + n][1];
+			pef [j] = pef[j + 1] + t1 * per[j + 1] + t1 * options.data[j + 1][1];
+		}
+	
+		if (options.intermediates) {
+			for (j = 0; j < n; j++) {
+				ar[n][j] = g[j + 1];
+			}
+		}
+		
+	}
+	if (!options.intermediates) {
+		for (n = 0; n < options.degree; n++) {
+			coef[n] = g[n + 1];
+		}
+		return coef;
+	} else {
+		return ar;
+	}
+	
+}
+
+
+// Autoregression method: Least Square
+timeseries.prototype.ARLeastSquare = function(options) {
+	// Credits to Rainer Hegger (1998)
+	// Ported to Javascript by Julien Loutre for timeseries-analysis, from Paul Bourke's C code.
+	var scope = this;
+	
+	options = _.extend({
+		degree:			5,
+		data:			this.data
+	}, options);
+	
+	var i,j,k,hj,hi;
+	var coefficients = [];
+	
+	var length 	= options.data.length;
+	var mat 	= this.fill([], options.degree);
+	mat			= _.map(mat, function(d1) {
+		return scope.fill(0, options.degree);
+	});
+	
+	for (i=0;i < options.degree;i++) {
+		coefficients[i] = 0.0;
+		for (j=0;j< options.degree;j++) {
+			mat[i][j] = 0.0;
+		}
+	}
+	for (i=options.degree-1;i < length-1;i++) {
+		hi = i + 1;
+		for (j=0;j < options.degree;j++) {
+			hj = i - j;
+			coefficients[j] += (options.data[hi][1] * options.data[hj][1]);
+			for (k=j;k < options.degree;k++) {
+				mat[j][k] += (options.data[hj][1] * options.data[i-k][1]);
+			}
+		}
+	}
+	for (i=0;i < options.degree;i++) {
+		coefficients[i] /= (length - options.degree);
+		for (j=i;j < options.degree;j++) {
+			mat[i][j] /= (length - options.degree);
+			mat[j][i] = mat[i][j];
+		}
+	}
+	
+	var solved = this.SolveLE(mat,coefficients,options.degree);
+	
+	return coefficients;
+	
+}
+
+timeseries.prototype.SolveLE = function(mat, vec, n) {
+	// Gaussian elimination solver.
+	// Use the coefficients from the Least Square method and make it into the real AR coefficients.
+	// Original code by Rainer Hegger (1998). Modified by Paul Bourke.
+	// Ported to Javascript by Julien Loutre for timeseries-analysis, from Paul Bourke's C code.
+	
+	var i,j,k,maxi;
+	var vswap 		= [];
+	var mswap 		= [];
+	var hvec 		= [];
+	var max,h,pivot,q;
+	
+	for (i=0;i<n-1;i++) {
+		max = Math.abs(mat[i][i]);
+		maxi = i;
+		for (j=i+1;j<n;j++) {
+			if ((h = Math.abs(mat[j][i])) > max) {
+				max = h;
+				maxi = j;
+			}
+		}
+		if (maxi != i) {
+			mswap     = mat[i];
+			mat[i]    = mat[maxi];
+			mat[maxi] = mswap;
+			vswap     = vec[i];
+			vec[i]    = vec[maxi];
+			vec[maxi] = vswap;
+		}
+	
+		hvec = mat[i];
+		pivot = hvec[i];
+		if (Math.abs(pivot) == 0.0) {
+			console.log("Singular matrix - fatal!");
+			return false;
+		}
+		for (j=i+1;j<n;j++) {
+			q = - mat[j][i] / pivot;
+			mat[j][i] = 0.0;
+			for (k=i+1;k<n;k++) {
+				mat[j][k] += q * hvec[k];
+			}
+			vec[j] += (q * vec[i]);
+		}
+	}
+	vec[n-1] /= mat[n-1][n-1];
+	for (i=n-2;i>=0;i--) {
+		hvec = mat[i];
+		for (j=n-1;j>i;j--) {
+			vec[i] -= (hvec[j] * vec[j]);
+		}
+		vec[i] /= hvec[i];
+	}
+	
+	return vec;
+}
+
+// Regression analysis. Will most likely be re-written in the future.
+timeseries.prototype.regression_analysis = function(options) {
+	// Original code by Professor Hossein Arsham - http://home.ubalt.edu/ntsbarsh/Business-stat/otherapplets/Trend.htm
+	// Re-written for timeseries-analysis.
+	
+	options = _.extend({
+		threshold:	2.5
+	}, options);
+	
+	var output 	= {};
+	
+	var i;
+	var j;
+	var E 		= this.data.length;  //total number of input spaces
+	var N 		= 0;
+	var N1 		= 0;
+	var N2 		= 0;
+	var SUM 	= 0.0;
+	var R 		= 1;
+	var Median	= 0;
+	var theList = new Array();
+	var cval 	= new Array();
+	// Run through all the input, add those that have valid values
+	var a		= 0;
+	for(i=0;i < E;i++) 	{
+		SUM 		+= this.data[i][1];
+		theList[a] 	= this.data[i][1];
+		cval[a] 	= this.data[i][1];
+		N++;
+		a++;
+	}
+	//check for insufficient data
+	if(N <= 10) {
+		console.log("Insufficient data (min 10)");
+		return false;
+	}
+	//sort the list
+	for(i=0; i<theList.length-1; i++) {
+		for(j=i+1;j<theList.length; j++) {
+			if (theList[j] < theList[i])  {
+				temp 		= theList[i];
+				theList[i] 	= theList[j];
+				theList[j] 	= temp;
+			}
+		}
+	}
+	//calculate Median
+	var aux = 0;
+	if(N%2 == 1) {
+		aux 	= Math.floor(N/2);
+		Median 	= theList[aux];
+	} else {
+		Median 	= (theList[N/2]+theList[((N/2)-1)])/2;
+	}
+	
+	// Do the math
+	var x = Median;
+	var y = Math.round(100000*x);
+	var z = y/100000;
+	// run through each value and compare it with mean
+	for(i = 0; i < E; i++)     {
+		//check if a value is present and discard the ties
+		if(this.data[i][1] != x)  {
+			//check if it is greater than mean then adds one
+			if (this.data[i][1] > x)		 {
+				N1++;
+				a = i;
+				while (a > 0)  {
+					a--;
+					if(this.data[a][1] != x) {
+						break;
+					}
+				}
+				if (this.data[a][1] < x) {
+					R++;
+				}
+			}
+			//if it is less than mean
+			else if (this.data[i][1] < x)   {
+				N2++;
+				a = i;
+				while (a > 0) {
+					a--;
+					if(this.data[a][1] != x)   {
+						break;
+					}
+				}
+				if (this.data[a][1] > x)  {
+					R++;
+				}
+			}
+		}
+	}
+	//form.NR.value = R;     //value of x or "Scores"
+	// What is the runs' statistic? I don't know...
+	// Is it http://en.wikipedia.org/wiki/Wald%E2%80%93Wolfowitz_runs_test ?
+	output.runs	= R;
+	
+
+	//compute the expected mean and variance of R
+	var EM 	= 1 + (2*N1*N2)/(N1+N2);           //Mean "Mu"
+	var SD1 = [2*N1*N2*(2*N1*N2-N1-N2)];
+	var SD2 = Math.pow( (N1 + N2), 2);
+	var SD3 = N1 + N2 - 1;
+	var SD4 = SD1 / (SD2 * SD3);           //Standard deviation "Sigma"
+	var SD 	= Math.sqrt(SD4);
+	//calculating P value MStyle
+	var z1 	= (R - EM)/SD;
+	var z2 	= Math.abs(z1);
+	var z 	= z2;
+	
+	/* Thanks to Jan de Leeuw for the following function */
+	var t 	= (z > 0) ? z : (-z);
+	var P1 	= Math.pow((1+t*(0.049867347 + t*(0.0211410061 + t*(0.0032776263 + t*(0.0000380036 + t*(0.0000488906 + t*(0.000005383))))))), -16);
+	var p 	= 1 - P1 / 2;
+	var t 	= 1-((z > 0) ? p : 1-p);         //this is P-value
+	
+	//rounding the value
+	var t1 	= Math.round(100000*t);
+	var t2 	= t1/100000;                  //this is P-value too
+	//form.PV.value = t2;
+
+	//determine the conclusion
+	// Encoding the trend value from 0 (no trend) to 3 (strong strend evidence)
+	if (t2 < 0.01)   {
+		//form.CON.value = "Strong evidence for trend";
+		output.trend	= 3;
+	} else if (t2 < 0.05 && t2 >= 0.01)  {
+		//form.CON.value = "Moderate evidence for trend";
+		output.trend	= 2;
+	} else if (t2 < 0.10 && t2 >= 0.05)  {
+		//form.CON.value = "Suggestive evidence for trend";
+		output.trend	= 1;
+	} else if (t2 >= 0.10)   {
+		//form.CON.value = "Little or no real evidences for trend";
+		output.trend	= 0;
+	} else {
+		//form.CON.value = "Strong evidence for trend";
+		output.trend	= 3;
+	}
+
+	//AUTO CORRELATION
+	var DWNN = 0;
+	var DWND = (cval[0]*cval[0]);
+	for (i=1; i<cval.length; i++)  {
+		DWNN = DWNN +(cval[i]- cval[i-1])*(cval[i]-cval[i-1]) ;
+		DWND = DWND +(cval[i]*cval[i]);
+	}
+	var DW = DWNN/DWND;
+	DW = Math.round(DW*100000)/100000;
+	//form.DW.value = DW;
+	output.durbinWatson	= DW;
+	
+	var Q01 	= 2-4.6527/(Math.sqrt(N+2));
+	var Q05 	= 2-3.2897/(Math.sqrt(N+2));
+	
+	//determine the conclusion
+	// Encode the correlation between 1 and 3
+	if((DW>=Q01) || (DW<=(4 - Q01)))  {
+		//form.COND.value = "Moderate evidence againt autocorrelation";
+		output.autocorrelation	= 2;
+	} else if((DW >= Q05)&&(DW<=(4 - Q05))) {
+		//form.COND.value = "Strong evidences against autocorrelation";
+		output.autocorrelation	= 3;
+	} else {
+		//form.COND.value = "Suggestive evidences for autocorrelation";
+		output.autocorrelation	= 1;
+	}
+	
+	return output;
+}
+
+// Get the Durbin-Watson statistic
+// http://en.wikipedia.org/wiki/Durbin%E2%80%93Watson_statistic
+timeseries.prototype.durbinWatson = function() {
+	return this.regression_analysis().durbinWatson;
+}
+
+// Get the Durbin-Watson statistic
+// http://en.wikipedia.org/wiki/Durbin%E2%80%93Watson_statistic
+timeseries.prototype.regression_analysis = function() {
+	return this.regression_analysis().durbinWatson;
+}
+
+
+
+
+// Data adapters
+var adapter = {
+	
+};
+adapter.fromDB = function(data, options) {
+	options = _.extend({
+		value:		'close',
+		date:		'date'
+	}, options);
+	
+	return _.map(data, function(datapoint) {
+		return [new Date(datapoint[options.date]).getTime(), datapoint[options.value]];
 	});
 };
+adapter.fromArray = function(data) {
+	return _.map(data, function(datapoint) {
+		return [new Date(), datapoint];
+	});
+};
+adapter.geometric = function(options) {
+	options = _.extend({
+	}, options);
+	
+	
+	var i;
+	var j;
+	var output = [];
+	for (i=0;i<128;i++) {
+		output.push([
+			new Date(),
+			Math.cos(i*0.01)+0.75*Math.cos(i*0.03)+0.5*Math.cos(i*0.05)+0.25*Math.cos(i*0.11)
+		]);
+	}
+	return output;
+};
+adapter.complex = function(options) {
+	options = _.extend({
+		cycles:		10,
+		quality:	1,
+		inertia:	0
+	}, options);
+	
+	
+	var i;
+	var j;
+	var output = [];
+	for (i=0;i<options.cycles;i++) {
+		for (j=0;j<360;j+=options.quality) {
+			output.push([
+				new Date(),
+				(Math.sin(j*Math.PI/180)+Math.cos(j*3*Math.PI/180)-Math.sin(j*2.4*Math.PI/180))*100
+			]);
+			options.quality += options.inertia;
+		}
+	}
+	return output;
+};
+adapter.sin = function(options) {
+	options = _.extend({
+		cycles:		4,
+		quality:	2,
+		inertia:	0	
+	}, options);
+	
+	var i;
+	var j;
+	var output 	= [];
+	for (i=0;i<options.cycles;i++) {
+		for (j=0;j<360;j+=options.quality) {
+			output.push([
+				new Date(),
+				Math.cos(j*Math.PI/180)*100
+			]);
+			options.quality += options.inertia;
+		}
+		console.log("options.quality",options.quality);
+	}
+	return output;
+};
+adapter.tan = function(options) {
+	options = _.extend({
+		cycles:		1
+	}, options);
+	var i;
+	var j;
+	var output = [];
+	for (i=0;i<options.cycles;i++) {
+		for (j=0;j<360;j++) {
+			output.push([
+				new Date(),
+				Math.tan(j*Math.PI/180)
+			]);
+		}
+	}
+	return output;
+};
 
-getData();
 
-console.log('audioBuffer: ', audioBuffer);
+exports.main		= timeseries;
+exports.adapter		= adapter;
+exports.version		= "1.0.11";
+
+/***/ }),
+/* 33 */
+/***/ (function(module, exports, __webpack_require__) {
+
+var _			= __webpack_require__(31);
 
 
-// pitch.input(sourceNode.start(0));
+
+// Util: encoding
+var simpleEncoding = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+// This function scales the submitted values so that
+// maxVal becomes the highest value.
+function simpleEncode(valueArray,maxValue) {
+	var chartData = ['s:'];
+	for (var i = 0; i < valueArray.length; i++) {
+		var currentValue = valueArray[i];
+		if (!isNaN(currentValue) && currentValue >= 0) {
+			chartData.push(simpleEncoding.charAt(Math.round((simpleEncoding.length-1) *
+			currentValue / maxValue)));
+		}
+		else {
+			chartData.push('_');
+		}
+	}
+	return chartData.join('');
+}
+
+// Same as simple encoding, but for extended encoding.
+var EXTENDED_MAP= 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-.';
+var EXTENDED_MAP_LENGTH = EXTENDED_MAP.length;
+
+function extendedEncode(arrVals, maxVal) {
+	var chartData = 'e:';
+
+	for(i = 0, len = arrVals.length; i < len; i++) {
+		// In case the array vals were translated to strings.
+		var numericVal = new Number(arrVals[i]);
+		// Scale the value to maxVal.
+		var scaledVal = Math.floor(EXTENDED_MAP_LENGTH *
+		EXTENDED_MAP_LENGTH * numericVal / maxVal);
+
+		if(scaledVal > (EXTENDED_MAP_LENGTH * EXTENDED_MAP_LENGTH) - 1) {
+			chartData += "..";
+		} else if (scaledVal < 0) {
+			chartData += '__';
+		} else {
+			// Calculate first and second digits and add them to the output.
+			var quotient = Math.floor(scaledVal / EXTENDED_MAP_LENGTH);
+			var remainder = scaledVal - EXTENDED_MAP_LENGTH * quotient;
+			chartData += EXTENDED_MAP.charAt(quotient) + EXTENDED_MAP.charAt(remainder);
+		}
+	}
+
+	return chartData;
+}
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+var google_image_chart = {
+	url:		"https://chart.googleapis.com/chart",
+	build:		function(params) {
+		var i;
+		var paramsArray = [];
+		for (i in params) {
+			paramsArray.push(i+"="+params[i]);
+		}
+		return google_image_chart.url+"?"+paramsArray.join("&");
+	}
+};
+
+
+/* Candlestick */
+google_image_chart.candlestick = function(options) {
+	this.options = _.extend({
+		width:		800,
+		height:		200,
+		volume:		true,
+		spacing:	2,
+		autoscale:	true
+	},options);
+}
+google_image_chart.candlestick.prototype.fromYahoo = function(data) {
+	var scope 	= this;
+	
+	this.data 	= data;
+	this.n		= data.length;
+	
+	var prices = {
+		l:	[],
+		o:	[],
+		c:	[],
+		h:	[]
+	};
+	this.chd 	= [];
+	
+	/*
+		L
+		O
+		C
+		H
+	*/
+		
+	_.each(data, function(point) {
+		prices.l.push(point.low);
+		prices.o.push(point.open);
+		prices.c.push(point.close);
+		prices.h.push(point.high);
+	});
+	this.min 	= _.min(prices.l);
+	this.max 	= _.max(prices.h);
+	
+	
+	// Prepend and append -1 values, to have the chart with full candles, not crossing the Y axis
+	
+	prices.l.splice(0,0,-1);
+	prices.o.splice(0,0,-1);
+	prices.c.splice(0,0,-1);
+	prices.h.splice(0,0,-1);
+	
+	prices.l.push(-1);
+	prices.o.push(-1);
+	prices.c.push(-1);
+	prices.h.push(-1);
+	
+	
+	this.chd.push(prices.l.join(","));
+	this.chd.push(prices.o.join(","));
+	this.chd.push(prices.c.join(","));
+	this.chd.push(prices.h.join(","));
+	
+}
+google_image_chart.candlestick.prototype.render = function() {
+	var params = {};
+	
+	params['cht'] = "lc";
+	params['chd'] = "t0:"+this.chd.join('|');
+	
+	params['chs'] 	= this.options.width+"x"+this.options.height;
+	
+	params['chm'] = "F,,0,-1,"+(Math.floor(this.options.width/this.n)*0.8);
+	
+	if (this.options.autoscale) {
+		params['chds'] 	= this.min+","+this.max;
+		//params['chxt'] 	= "y";
+		//params['chxr'] 	= "0,"+this.min+","+this.max+",10";
+	}
+	
+	return google_image_chart.build(params);
+}
+
+
+
+
+/* Bar (volume) */
+google_image_chart.bar = function(options) {
+	this.options = _.extend({
+		width:		800,
+		height:		200,
+		volume:		true,
+		spacing:	2,
+		autoscale:	true
+	},options);
+}
+google_image_chart.bar.prototype.fromYahoo = function(data, key) {
+	var scope 	= this;
+	
+	this.data 	= data;
+	this.n		= data.length;
+	var points	= [];
+		
+	_.each(data, function(point) {
+		points.push(point[key]);
+	});
+	
+	this.min 	= _.min(points);
+	this.max 	= _.max(points);
+	
+	/*
+	// Prepend and append -1 values, to have the chart with full candles, not crossing the Y axis
+	points.splice(0,0,-1);
+	points.push(-1);
+	*/
+	
+	this.chd = simpleEncode(points, this.max);
+	
+}
+google_image_chart.bar.prototype.render = function() {
+	var params = {};
+	
+	params['cht'] 	= "bvs";
+	params['chco'] 	= "76A4FB";
+	params['chd'] 	= this.chd;
+	
+	params['chs'] 	= this.options.width+"x"+this.options.height;
+	
+	params['chbh'] = "a";
+	
+	
+	/*
+	if (this.options.autoscale) {
+		params['chds'] 	= this.min+","+this.max;
+		params['chxt'] 	= "y";
+		params['chxr'] 	= "0,"+this.min+","+this.max+",10";
+	}
+	*/
+	return google_image_chart.build(params);
+}
+
+
+
+
+/* Line (Indicators) */
+google_image_chart.line = function(options) {
+	this.options = _.extend({
+		width:		800,
+		height:		200,
+		bands:		false,
+		autoscale:	true,
+		hlines:		false	// Horizontal lines are a new serie, since Google Image doesn't support it...
+	},options);
+	
+	
+	this.datasets	= {};
+	this.chd 		= [];
+	this.chco		= [];
+	
+	this.min 		= 10000000000;
+	this.max 		= -10000000000;
+	
+	
+	
+	this.rainbow 	= new Rainbow();
+	this.rainbow.setSpectrum("76A4FB","E15393");
+}
+google_image_chart.line.prototype.fromYahoo = function(data) {
+	var scope 	= this;
+	
+	this.data 	= data;
+	this.n		= data.length;
+	
+	this.datasets	= {};
+	this.chd 		= [];
+	this.chco		= [];
+	
+	var prices		= {
+		high:	"B61717",
+		low:	"3283E4",
+		//open:	"A5E036",
+		close:	"222222"
+	};
+	
+	for (price in prices) {
+		scope.datasets[price] = {
+			data:	[],
+			min:	0,
+			max:	0
+		};
+		_.each(data, function(datapoint) {
+			scope.datasets[price].data.push(datapoint[price]);
+		});
+		
+		scope.datasets[price].min 		= _.min(scope.datasets[price].data);
+		scope.datasets[price].max 		= _.max(scope.datasets[price].data);
+		
+		
+		
+		if (scope.datasets[price].min < scope.min) {
+			scope.min = scope.datasets[price].min;
+		}
+		if (scope.datasets[price].max > scope.max) {
+			scope.max = scope.datasets[price].max;
+		}
+	}
+	for (price in prices) {
+		
+		scope.chd.push(scope.datasets[price].data);
+		
+		scope.chco.push(prices[price]);
+	}
+	
+}
+google_image_chart.line.prototype.fromTradeStudio = function(data) {
+	var scope 		= this;
+	
+	this.data 		= data;
+	this.n			= data.length;
+	
+	_.each(data, function(dataset) {
+		scope.datasets[dataset.name] = {
+			data:	[],
+			min:	0,
+			max:	0
+		};
+		_.each(dataset.data, function(datapoint) {
+			scope.datasets[dataset.name].data.push(datapoint[1]);
+		});
+		
+		scope.datasets[dataset.name].min 		= _.min(scope.datasets[dataset.name].data);
+		scope.datasets[dataset.name].max 		= _.max(scope.datasets[dataset.name].data);
+		
+		if (scope.datasets[dataset.name].min < scope.min) {
+			scope.min = scope.datasets[dataset.name].min;
+		}
+		if (scope.datasets[dataset.name].max > scope.max) {
+			scope.max = scope.datasets[dataset.name].max;
+		}
+	});
+	
+	_.each(data, function(dataset) {
+		
+		scope.chd.push(scope.datasets[dataset.name].data);
+		if (dataset.color) {
+			scope.chco.push(dataset.color);
+		} else {
+			scope.chco.push("AUTO");
+		}
+	});
+	
+}
+google_image_chart.line.prototype.fromTimeseries = function(data) {
+	var scope 		= this;
+	
+	this.data 		= data;
+	this.n			= data.length;
+	
+	var name 		= _.uniqueId('chart_');
+	
+	scope.datasets[name] = {
+		data:	[],
+		min:	0,
+		max:	0
+	};
+	_.each(data, function(datapoint) {
+		scope.datasets[name].data.push(datapoint[1]);
+	});
+	
+	scope.datasets[name].min 		= _.min(scope.datasets[name].data);
+	scope.datasets[name].max 		= _.max(scope.datasets[name].data);
+	
+	if (scope.datasets[name].min < scope.min) {
+		scope.min = scope.datasets[name].min;
+	}
+	if (scope.datasets[name].max > scope.max) {
+		scope.max = scope.datasets[name].max;
+	}
+	scope.chd.push(scope.datasets[name].data);
+	
+	scope.chco.push("AUTO");
+	
+}
+google_image_chart.line.prototype.fromArray = function(data) {
+	var scope 		= this;
+	
+	this.data 		= data;
+	this.n			= data.length;
+	this.datasets	= {};
+	this.chd 		= [];
+	this.chco		= [];
+	
+	this.min 		= 10000000000;
+	this.max 		= -10000000000;
+	
+	var c = 0;
+	
+	_.each(data, function(dataset, name) {
+		c++;
+		scope.datasets[name] = {
+			data:	[],
+			min:	0,
+			max:	0
+		};
+		_.each(dataset, function(datapoint) {
+			scope.datasets[name].data.push(datapoint);
+		});
+		
+		scope.datasets[name].min 		= _.min(scope.datasets[name].data);
+		scope.datasets[name].max 		= _.max(scope.datasets[name].data);
+		
+		if (scope.datasets[name].min < scope.min) {
+			scope.min = scope.datasets[name].min;
+		}
+		if (scope.datasets[name].max > scope.max) {
+			scope.max = scope.datasets[name].max;
+		}
+	});
+	
+	//console.log("Min", scope.min);
+	//console.log("Max", scope.max);
+	
+	c = 0;
+	_.each(data, function(dataset, name) {
+		c++
+		scope.chd.push(scope.datasets[name].data);
+		
+		if (dataset.color) {
+			scope.chco.push(dataset.color);
+		} else {
+			scope.chco.push("AUTO");
+			//var color = scope.rainbow.colorAt(c);
+			//scope.chco.push(color);
+		}
+	});
+	
+	
+}
+google_image_chart.line.prototype.render = function() {
+	var scope = this;
+	
+	var i;
+	
+	var params = {};
+	
+	params['cht'] 	= "lc";
+	
+	params['chs'] 	= this.options.width+"x"+this.options.height;
+	
+	params['chxt'] 	= "y";
+	
+	
+	
+	
+	if (this.options.hlines) {
+		// Add a new serie
+		_.each(this.options.hlines, function(v) {
+			var i;
+			scope.chd.push([v,v]);
+			scope.chco.push("ABABAB");
+		});
+	}
+	
+	// Encode the CHDs
+	
+	for (i=0;i<this.chd.length;i++) {
+		if (scope.options.autoscale) {
+			this.chd[i]	= _.map(this.chd[i], function(datapoint) {
+				return datapoint-scope.min;
+			});
+			this.chd[i] = simpleEncode(this.chd[i], scope.max-scope.min);
+		} else {
+			this.chd[i] = simpleEncode(this.chd[i], scope.max);
+		}
+	}
+	
+	
+	if (this.chd.length > 1) {
+		// Remove the extra "s:" from the encoded data
+		for (i=1;i<this.chd.length;i++) {
+			this.chd[i] = this.chd[i].substr(2);
+		}
+	}
+	
+	params['chd'] 	= this.chd.join(",");
+	
+	
+	// Process the colors;
+	this.rainbow.setNumberRange(0, Math.max(this.chco.length, 1));
+	for (i=0;i<this.chco.length;i++) {
+		if (this.chco[i] == "AUTO") {
+			this.chco[i] = this.rainbow.colorAt(i);
+			//console.log("color "+i,this.chco[i]);
+		}
+	}
+	params['chco'] 	= this.chco.join(","); //"76A4FB";
+	
+	
+	
+	if (this.options.bands) {
+		var bands = [];
+		_.each(this.options.bands, function(band) {
+			bands.push("r,"+band.color+",0,"+band.from+","+band.to);
+		});
+		params['chm'] = bands.join("|");
+	}
+	
+	
+	if (this.options.autoscale) {
+		params['chds'] 	= this.min+","+this.max;
+		params['chxt'] 	= "y";
+		params['chxr'] 	= "0,"+this.min+","+this.max+",10";
+	}
+	
+	return google_image_chart.build(params);
+}
+
+
+exports.charts = google_image_chart;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+RainbowVis-JS 
+Released under MIT License
+*/
+
+function Rainbow()
+{
+	var gradients = null;
+	var minNum = 0;
+	var maxNum = 100;
+	var colours = ['ff0000', 'ffff00', '00ff00', '0000ff']; 
+	setColours(colours);
+	
+	function setColours (spectrum) 
+	{
+		if (spectrum.length < 2) {
+			throw new Error('Rainbow must have two or more colours.');
+		} else {
+			var increment = (maxNum - minNum)/(spectrum.length - 1);
+			var firstGradient = new ColourGradient();
+			firstGradient.setGradient(spectrum[0], spectrum[1]);
+			firstGradient.setNumberRange(minNum, minNum + increment);
+			gradients = [ firstGradient ];
+			
+			for (var i = 1; i < spectrum.length - 1; i++) {
+				var colourGradient = new ColourGradient();
+				colourGradient.setGradient(spectrum[i], spectrum[i + 1]);
+				colourGradient.setNumberRange(minNum + increment * i, minNum + increment * (i + 1)); 
+				gradients[i] = colourGradient; 
+			}
+
+			colours = spectrum;
+		}
+	}
+	this.setColors = this.setColours;
+
+	this.setSpectrum = function () 
+	{
+		setColours(arguments);
+	}
+
+	this.setSpectrumByArray = function (array)
+	{
+		setColours(array);
+	}
+
+	this.colourAt = function (number)
+	{
+		if (isNaN(number)) {
+			throw new TypeError(number + ' is not a number');
+		} else if (gradients.length === 1) {
+			return gradients[0].colourAt(number);
+		} else {
+			var segment = (maxNum - minNum)/(gradients.length);
+			var index = Math.min(Math.floor((Math.max(number, minNum) - minNum)/segment), gradients.length - 1);
+			return gradients[index].colourAt(number);
+		}
+	}
+	this.colorAt = this.colourAt;
+
+	this.setNumberRange = function (minNumber, maxNumber)
+	{
+		if (maxNumber > minNumber) {
+			minNum = minNumber;
+			maxNum = maxNumber;
+			setColours(colours);
+		} else {
+			throw new RangeError('maxNumber (' + maxNumber + ') is not greater than minNumber (' + minNumber + ')');
+		}
+	}
+}
+
+function ColourGradient() 
+{
+	var startColour = 'ff0000';
+	var endColour = '0000ff';
+	var minNum = 0;
+	var maxNum = 100;
+
+	this.setGradient = function (colourStart, colourEnd)
+	{
+		startColour = getHexColour(colourStart);
+		endColour = getHexColour(colourEnd);
+	}
+
+	this.setNumberRange = function (minNumber, maxNumber)
+	{
+		if (maxNumber > minNumber) {
+			minNum = minNumber;
+			maxNum = maxNumber;
+		} else {
+			throw new RangeError('maxNumber (' + maxNumber + ') is not greater than minNumber (' + minNumber + ')');
+		}
+	}
+
+	this.colourAt = function (number)
+	{
+		return calcHex(number, startColour.substring(0,2), endColour.substring(0,2)) 
+			+ calcHex(number, startColour.substring(2,4), endColour.substring(2,4)) 
+			+ calcHex(number, startColour.substring(4,6), endColour.substring(4,6));
+	}
+	
+	function calcHex(number, channelStart_Base16, channelEnd_Base16)
+	{
+		var num = number;
+		if (num < minNum) {
+			num = minNum;
+		}
+		if (num > maxNum) {
+			num = maxNum;
+		} 
+		var numRange = maxNum - minNum;
+		var cStart_Base10 = parseInt(channelStart_Base16, 16);
+		var cEnd_Base10 = parseInt(channelEnd_Base16, 16); 
+		var cPerUnit = (cEnd_Base10 - cStart_Base10)/numRange;
+		var c_Base10 = Math.round(cPerUnit * (num - minNum) + cStart_Base10);
+		return formatHex(c_Base10.toString(16));
+	}
+
+	formatHex = function (hex) 
+	{
+		if (hex.length === 1) {
+			return '0' + hex;
+		} else {
+			return hex;
+		}
+	} 
+	
+	function isHexColour(string)
+	{
+		var regex = /^#?[0-9a-fA-F]{6}$/i;
+		return regex.test(string);
+	}
+
+	function getHexColour(string)
+	{
+		if (isHexColour(string)) {
+			return string.substring(string.length - 6, string.length);
+		} else {
+			var colourNames =
+			[
+				['red', 'ff0000'],
+				['lime', '00ff00'],
+				['blue', '0000ff'],
+				['yellow', 'ffff00'],
+				['orange', 'ff8000'],
+				['aqua', '00ffff'],
+				['fuchsia', 'ff00ff'],
+				['white', 'ffffff'],
+				['black', '000000'],
+				['gray', '808080'],
+				['grey', '808080'],
+				['silver', 'c0c0c0'],
+				['maroon', '800000'],
+				['olive', '808000'],
+				['green', '008000'],
+				['teal', '008080'],
+				['navy', '000080'],
+				['purple', '800080']
+			];
+			for (var i = 0; i < colourNames.length; i++) {
+				if (string.toLowerCase() === colourNames[i][0]) {
+					return colourNames[i][1];
+				}
+			}
+			throw new Error(string + ' is not a valid colour.');
+		}
+	}
+}
+
+
+exports.colors = Rainbow;
 
 /***/ })
 /******/ ]);
