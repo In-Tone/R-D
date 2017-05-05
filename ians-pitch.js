@@ -5,7 +5,8 @@ const Pitchfinder = require("pitchfinder");
 // see below for optional constructor parameters.
 const detectPitch = new Pitchfinder.YIN();
 
-const buffer = fs.readFileSync('iancow.wav');
+const buffer = fs.readFileSync('ian-ooo.wav');
+// need this to read from the wav file
 const decoded = WavDecoder.decode(buffer)
 .then(data => {
   const float32Array = data.channelData[0]; // get a single channel of sound
@@ -15,6 +16,7 @@ const decoded = WavDecoder.decode(buffer)
     quantization: 4, // samples per beat, defaults to 4 (i.e. 16th notes)
   });
 
+  // filter out bad data - hacky for now, throws out nulls and high values
   frequencies = frequencies.filter(freq => {
     if (typeof freq === 'number') {
       return freq < 10000
