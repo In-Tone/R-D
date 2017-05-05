@@ -1,5 +1,5 @@
 module.exports = {
-  entry: './test_0504-3.js', // assumes your entry point is the index.js in the root of your project folder
+  entry: './test-inToneCore.js', // assumes your entry point is the index.js in the root of your project folder
   output: {
     path: __dirname,
     filename: './bundle.js' // assumes your bundle.js will also be in the root of your project folder
