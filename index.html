@@ -4,18 +4,36 @@
  <link rel = "stylesheet"
    type = "text/css"
    href = "style.css" />
+   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+   <title>IN-TONE</title>
 	</head>
 	<body>
 		<div id="app">
 			<br />
-			<button id="record">RECORD</button>
-			<button id="stop">STOP</button>
-			<br />
-			<br />
 			<canvas id='canvas' width='1000' height='1000'></canvas>
 			<div id='soundClips'></div>
 <!-- 			<div id='plot' style='width:100% ;height:250px;''></div> -->
+			<div id="buttons">
+			<br />
+			<button id="record">RECORD</button>
+			<button id="stop">STOP</button>
+			<br />
+			</div>
+			<div id="tester" style="width:600px;height:250px;"></div>
 			<script src="bundle.js"></script>
+			<!-- <script>
+			var x = [1, 2, 3, 4, 5];
+var y = [1, 2, 4, 8, 16];
+
+    TESTER = document.getElementById('tester');
+    Plotly.plot( TESTER, [{
+    x: x,
+    y: y}], {
+    margin: { t: 0 } } );
+			</script> -->
+			<script>
+
+			</script>
 		</div>
 	</body>
 </html>

@@ -12276,9 +12276,17 @@ function config (name) {
 
 const autocorrelation = __webpack_require__(26).autocorrelation;
 const chroma = __webpack_require__(27);
-let Plotly = __webpack_require__(28);
+let Plotly = __webpack_require__(28)('mikeluz', '3vgNiLnEqG8XudnTUhUg');
 const fft = __webpack_require__(11);
 const PitchAnalyzer = __webpack_require__(29);
+
+// var data = [{x:[0,1,2], y:[3,2,1], type: 'bar'}];
+// var layout = {fileopt : "overwrite", filename : "simple-node-example"};
+
+// Plotly.plot(data, layout, function (err, msg) {
+//     if (err) return console.log(err);
+//     console.log(msg);
+// });
 
 // create the audio context (chrome only for now)
 if (! window.AudioContext) {
@@ -12365,7 +12373,7 @@ javascriptNode.onaudioprocess = function () {
     analyser.getFloatFrequencyData(array);
 
     // console.log("sourceNode", sourceNode.buffer);
-    var data = sourceNode.buffer.getChannelData(0);
+    // var data = sourceNode.buffer.getChannelData(0);
 
     /* Create a new pitch detector */
     var pitchOne = new PitchAnalyzer(44100);
@@ -12381,33 +12389,28 @@ javascriptNode.onaudioprocess = function () {
     var tones = [];
     var vols = [];
 
-    while (n < data.length && i < 50000) {
-        pitchOne.input(data.slice(n-1000, n));
-        /* Process the current input in the internal buffer */
-        pitchOne.process();
-        // console.log("pitchOne instance", pitchOne);
+    // while (n < data.length && i < 50000) {
+    //     pitchOne.input(data.slice(n-1000, n));
+    //     /* Process the current input in the internal buffer */
+    //     pitchOne.process();
+    //     // console.log("pitchOne instance", pitchOne);
 
-        var toneOne = pitchOne.findTone();
+    //     var toneOne = pitchOne.findTone();
 
-        if (toneOne === null) {
-            // console.log('No tone found!');
-            tones.push(0);
-            vols.push(0);
-        } else {
-            // console.log('Found a toneOne, frequency:', toneOne.freq, 'volume:', toneOne.db);
-            tones.push(toneOne.freq);
-            vols.push(toneOne.db);
-        }
-        n = n+1000;
-        i++;
-    }
+    //     if (toneOne === null) {
+    //         // console.log('No tone found!');
+    //         tones.push(0);
+    //         vols.push(0);
+    //     } else {
+    //         // console.log('Found a toneOne, frequency:', toneOne.freq, 'volume:', toneOne.db);
+    //         tones.push(toneOne.freq);
+    //         vols.push(toneOne.db);
+    //     }
+    //     n = n+1000;
+    //     i++;
+    // }
     // console.log("tones.length / tones", tones.length, tones);
     // console.log("vols.length / vols", vols.length, vols);
-
-    // LOOPING HERE
-    // draw the spectrogram
-    // drawSpectrogram(array);
-
 }
 
 // mic situation
@@ -12431,7 +12434,8 @@ var arrayTwo = new Uint8Array(viz.frequencyBinCount);
 function draw() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgb(214, 68, 68)';
+    // ctx.fillStyle = 'rgb(214, 68, 68)';
+    ctx.fillStyle = 'transparent';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.lineWidth = 10;
@@ -12475,7 +12479,7 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
     };
 
     var source = context.createMediaStreamSource(stream);
-    viz.getFloatFrequencyData(arrayOne);
+    // viz.getByteTimeDomainData(arrayOne);
     source.connect(lpFilter);
     lpFilter.connect(hpFilter);
     hpFilter.connect(viz);
@@ -12485,6 +12489,10 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
 
     var repeatDraw;
 
+    // viz.getByteTimeDomainData(arrayTwo);
+
+    var newArray = new Uint8Array(2048);
+
     record.onclick = function() {
     viz.connect(context.destination);
         mediaRecorder.start();
@@ -12492,7 +12500,7 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
             // mediaRecorder.requestData();
             viz.getByteTimeDomainData(arrayTwo);
             draw();
-        }, 100);
+        }, 1000);
         record.style.background = "red";
         record.style.color = "black";
     }
@@ -12537,8 +12545,52 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
         reader.addEventListener("loadend", function() {
             // while (reader.result.byteLength % 4 !== 0) {
             //     console.log("BAD");
+
             // }
             var buffer = new Uint8Array(reader.result);
+
+            const findFundamentalFreq = (buffer, sampleRate) => {
+                // We use autocorrelation to find the fundamental frequency.
+
+                // In order to correlate the signal with itself (hence the name of the algorithm), we will check two points 'k' frames away.
+                // The autocorrelation index will be the average of these products. At the same time, we normalize the values.
+                // Source: http://www.phy.mty.edu/~suits/autocorrelation.html
+
+                // the default sample rate, depending on the hardware, is 44100Hz or 48000Hz.
+                // a 'k' range between 120 and 650 covers signals ranging from ~70Hz to ~350Hz, which is just a little broader than the average frequency range for human speech (80-260Hz, per Wikipedia).
+                var n = 1024, bestR = 0, bestK = -1;
+                for(var k = 120; k <= 650; k++){
+                    var sum = 0;
+
+                    for(var i = 0; i < n; i++){
+                        sum += ((buffer[i] - 128) / 128) * ((buffer[i + k] - 128) / 128);
+                    }
+
+                    var r = sum  / (n + k);
+
+                    if(r > bestR){
+                        bestR = r;
+                        bestK = k;
+                    }
+
+                    if(r > 0.95) {
+                        // Let's assume that this is good enough and stop right here
+                        break;
+                    }
+                }
+
+                console.log("bestR", bestR);
+
+                if(bestR > 0.0025) {
+                    // The period (in frames) of the fundamental frequency is 'bestK'. Getting the frequency from there is trivial.
+                    var fundamentalFreq = sampleRate / bestK;
+                    return fundamentalFreq;
+                }
+                else {
+                    // We haven't found a good correlation
+                    return -1;
+                }
+            };
 
             var pitchCon = new PitchAnalyzer(44100);
 
@@ -12549,6 +12601,11 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
             var vols = [];
 
             while (n < buffer.length && i < 50000) {
+
+                console.log("f0....", findFundamentalFreq(newArray.slice(n-1000, n-99), 44100));
+                // console.log("newArray", newArray);
+                console.log("f0", findFundamentalFreq(buffer.slice(n-1000, n-99), 44100));
+
                 pitchCon.input(buffer.slice(n-1000, n));
                 /* Process the current input in the internal buffer */
                 pitchCon.process();
@@ -12558,7 +12615,7 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
 
                 if (toneOne === null) {
                     console.log('No tone found!');
-                    tones.push(0);
+                    tones.push(300);
                     vols.push(0);
                 } else {
                     console.log('Found a toneOne, frequency:', toneOne.freq, 'volume:', toneOne.db);
@@ -12568,6 +12625,23 @@ navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
                 n = n+1000;
                 i++;
             }
+
+            var tonesY = function() {
+                var array = [];
+                for (let i = 0; i < tones.length; i++) {
+                    array.push(i);
+                }
+                return array;
+            }
+
+            var data = [{x:tonesY(), y:tones, type: 'tones'}];
+            var layout = {fileopt : "overwrite", filename : "tones"};
+
+            Plotly.plot(data, layout, function (err, msg) {
+                if (err) return console.log(err);
+                console.log(msg);
+            });
+
             console.log('tones', tones);
             console.log('vols', vols);
 
