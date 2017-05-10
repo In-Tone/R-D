@@ -15,7 +15,7 @@ app.get('/', function (req, res) {
 
 app.get('/test', (req, res) => {
   const detectPitch = new Pitchfinder.AMDF();
-  const buffer = fs.readFileSync('./audio/Falling-Chai-Yes-Clipped.wav');
+  const buffer = fs.readFileSync('./audio/Rising-Sai-Clear.wav');
 
   const decoded = WavDecoder.decode(buffer)
   .then(data => {
